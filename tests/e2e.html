@@ -1,0 +1,139 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Knightly e2e</title>
+<style>body{margin:0;display:flex;gap:10px;font:12px monospace}iframe{border:0;width:390px;height:844px}pre{flex:1;white-space:pre-wrap}</style>
+<iframe id="f"></iframe><pre id="out"></pre>
+<script type="module">
+const f = document.getElementById('f');
+const out = document.getElementById('out');
+const lines = []; let fails = 0;
+const log = (ok, m) => { if (!ok) fails++; lines.push((ok ? 'PASS ' : 'FAIL ') + m); out.textContent = lines.join('\n'); };
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const W = () => f.contentWindow, D = () => f.contentDocument;
+async function waitFor(fn, ms = 15000, step = 100) { const t = Date.now(); while (Date.now() - t < ms) { try { const v = fn(); if (v) return v; } catch { } await sleep(step); } return null; }
+const store = (k, v) => W().localStorage.setItem('knightly.' + k, JSON.stringify(v));
+const read = k => JSON.parse(W().localStorage.getItem('knightly.' + k) || 'null');
+
+function tapSquare(sq, orientation = 'w') {
+  const board = D().querySelector('.board');
+  const r = board.getBoundingClientRect();
+  const f = 'abcdefgh'.indexOf(sq[0]), rk = +sq[1] - 1;
+  const x = orientation === 'w' ? f : 7 - f, y = orientation === 'w' ? 7 - rk : rk;
+  const cx = r.left + (x + .5) * r.width / 8, cy = r.top + (y + .5) * r.height / 8;
+  const opts = { bubbles: true, clientX: cx, clientY: cy, pointerId: 1, button: 0, isPrimary: true };
+  board.dispatchEvent(new (W().PointerEvent)('pointerdown', opts));
+  board.dispatchEvent(new (W().PointerEvent)('pointerup', opts));
+}
+async function move(from, to, o) { tapSquare(from, o); await sleep(80); tapSquare(to, o); await sleep(300); }
+async function go(hash) { W().location.hash = hash; await sleep(500); }
+
+async function run() {
+  f.src = '../index.html?nosw#/';
+  await waitFor(() => D() && D().querySelector('.tile'));
+  W().localStorage.clear();
+  store('settings', { sound: false, animation: false, coach: true });
+  log(!!D().querySelector('.tile'), 'home renders');
+
+  // ---------- game vs bot ----------
+  await go('#/play');
+  D().querySelector('.bot[data-id="pip"]').click();
+  D().querySelector('#colorSeg [data-c="w"]').click();
+  D().querySelector('#startBtn').click();
+  await waitFor(() => D().querySelector('#boardWrap .board'));
+  log(!!D().querySelector('.board .piece'), 'game board renders with pieces');
+  await sleep(800);
+  await move('e2', 'e4');
+  let g = await waitFor(() => { const x = read('game'); return x && x.moves.length >= 2 ? x : null; }, 20000);
+  log(!!g, 'bot replied to 1.e4: ' + (g && g.moves.join(' ')));
+  const coach1 = D().querySelector('#coachMsg').textContent;
+  log(coach1.length > 0, 'coach message after move: ' + coach1.slice(0, 80));
+  // second move: play a knight move
+  await waitFor(() => D().querySelector('.board .sq') && !D().querySelector('.thinking'), 15000);
+  await sleep(500);
+  await move('g1', 'f3');
+  g = await waitFor(() => { const x = read('game'); return x && x.moves.length >= 4 ? x : null; }, 20000);
+  log(!!g, 'second move cycle: ' + (g && g.moves.join(' ')));
+  await waitFor(() => !D().querySelector('.thinking'), 10000);
+  await sleep(1500);
+  const coach2 = D().querySelector('#coachMsg').innerHTML;
+  log(/tag/.test(coach2) || coach2.length > 0, 'coach classification shown: ' + D().querySelector('#coachMsg').textContent.slice(0, 90));
+  // hint
+  D().querySelector('#hintBtn').click();
+  await waitFor(() => D().querySelector('.sq.hint'), 15000);
+  log(!!D().querySelector('.sq.hint'), 'hint highlights a piece');
+  // takeback
+  const before = read('game').moves.length;
+  D().querySelector('#undoBtn').click();
+  await sleep(600);
+  log(read('game').moves.length === before - 2, `takeback removes two plies (${before} -> ${read('game').moves.length})`);
+
+  // ---------- review of a finished game (fool's mate) ----------
+  store('game', { botId: 'theo', playerColor: 'w', moves: ['f2f3', 'e7e5', 'g2g4', 'd8h4'], evals: {}, marks: {}, result: { winner: 'b', reason: 'checkmate' }, recorded: true, hints: 0, takebacks: 0, started: 1 });
+  await go('#/review');
+  const sum = await waitFor(() => /accuracy/i.test(D().querySelector('#summary').textContent) && D().querySelector('#summary').textContent, 30000);
+  log(!!sum, 'review summary: ' + (sum || '').replace(/\s+/g, ' ').slice(0, 120));
+  log(/Blunder/.test(sum || ''), 'review flags blunders');
+
+  // ---------- lesson with task ----------
+  await go('#/lesson/forks');
+  D().querySelector('#nextBtn').click();
+  await sleep(400);
+  await move('d5', 'c7');
+  await sleep(900);
+  await move('c7', 'a8');
+  await sleep(400);
+  const fb = D().querySelector('#fb');
+  log(fb && fb.classList.contains('ok'), 'fork lesson task solved: ' + (fb && fb.textContent.slice(0, 60)));
+  // wrong move feedback in next step
+  D().querySelector('#nextBtn').click();
+  await sleep(400);
+  await move('e1', 'e2');
+  const fb2 = D().querySelector('#fb');
+  log(fb2 && fb2.classList.contains('fail'), 'wrong move gives feedback: ' + (fb2 && fb2.textContent.slice(0, 40)));
+
+  // ---------- play-vs-engine lesson step ----------
+  await go('#/lesson/kqk');
+  D().querySelector('#nextBtn').click();
+  await sleep(400);
+  await move('d1', 'd3');
+  const replied = await waitFor(() => /Your move/.test(D().querySelector('#fb').textContent), 15000);
+  log(!!replied, 'engine defends in play-task');
+
+  // ---------- puzzle ----------
+  await go('#/puzzle');
+  await waitFor(() => /to move/.test(D().querySelector('#statusText').textContent), 15000);
+  await sleep(800);
+  // read current puzzle solution from the data to solve it
+  const id = (D().querySelector('#pInfo').innerHTML.match(/Puzzle (\w+)</) || [])[1];
+  const db = await fetch('../data/puzzles.json').then(r => r.json());
+  const p = db.find(x => x.id === id);
+  log(!!p, 'puzzle loaded: ' + id);
+  if (p) {
+    const ms = p.m.split(' ');
+    const orient = D().querySelector('.board .coord.file').textContent === 'h' ? 'b' : 'w';
+    for (let i = 1; i < ms.length; i += 2) {
+      const u = ms[i];
+      await move(u.slice(0, 2), u.slice(2, 4), orient);
+      if (u.length > 4) { await sleep(200); const b = D().querySelector('.promo button[data-p="' + u[4] + '"]'); if (b) b.dispatchEvent(new (W().PointerEvent)('pointerdown', { bubbles: true })); }
+      await sleep(1100);
+    }
+    const ok = await waitFor(() => D().querySelector('#status.ok') && /solved|Well done|Excellent|Great/i.test(D().querySelector('#statusText').textContent), 5000);
+    log(!!ok, 'puzzle solved by playing the solution; rating now ' + Math.round(read('puzzles')?.rating));
+  }
+
+  // ---------- opening course practice ----------
+  await go('#/course/italian');
+  D().querySelector('#modeSeg [data-m="practice"]').click();
+  await sleep(300);
+  await move('e2', 'e4');
+  await waitFor(() => D().querySelectorAll('#moves .mv').length >= 2, 4000);
+  await move('d2', 'd4'); // wrong
+  await sleep(600);
+  log(/Not the book move/.test(D().querySelector('#note').textContent), 'course practice rejects non-book move');
+
+  lines.unshift(fails ? `RESULT: ${fails} FAILURES` : 'RESULT: ALL PASSED');
+  out.textContent = lines.join('\n');
+  await fetch('/__log', { method: 'POST', body: lines.join('\n') });
+}
+run().catch(async e => { lines.unshift('CRASH ' + e.stack); await fetch('/__log', { method: 'POST', body: lines.join('\n') }); });
+</script>

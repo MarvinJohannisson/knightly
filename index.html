@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#1c1b19">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Knightly">
+  <meta name="description" content="Free chess trainer: play bots, solve puzzles, learn openings and tactics.">
+  <title>Knightly</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="assets/icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <button class="icon-btn" id="backBtn" aria-label="Back" hidden>
+      <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg>
+    </button>
+    <h1 id="viewTitle">Knightly</h1>
+    <button class="icon-btn" id="settingsBtn" aria-label="Settings">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.6M12 18.6v2.6M21.2 12h-2.6M5.4 12H2.8M18.5 5.5l-1.8 1.8M7.3 16.7l-1.8 1.8M18.5 18.5l-1.8-1.8M7.3 7.3L5.5 5.5"/></svg>
+    </button>
+  </header>
+
+  <main id="view" class="view"></main>
+
+  <nav class="tabbar" id="tabbar">
+    <a href="#/" data-tab="home"><svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg><span>Home</span></a>
+    <a href="#/play" data-tab="play"><svg viewBox="0 0 24 24"><path d="M9 4h6l-1 3h2l-1.5 5h-5L8 7h2zM8 13h8l1 5H7zM5 19h14v2H5z"/></svg><span>Play</span></a>
+    <a href="#/puzzles" data-tab="puzzles"><svg viewBox="0 0 24 24"><path d="M10 3a2 2 0 0 1 4 0v2h4v4h-2a2 2 0 0 0 0 4h2v6H4v-6h2a2 2 0 0 0 0-4H4V5h6z"/></svg><span>Puzzles</span></a>
+    <a href="#/learn" data-tab="learn"><svg viewBox="0 0 24 24"><path d="M2 8l10-5 10 5-10 5zM6 10.5V16c0 1.5 3 3 6 3s6-1.5 6-3v-5.5M21 8v6"/></svg><span>Learn</span></a>
+  </nav>
+
+  <div id="modalRoot"></div>
+  <div id="toast" class="toast" hidden></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

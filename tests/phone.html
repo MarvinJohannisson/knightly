@@ -1,0 +1,9 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Phone preview</title>
+<style>body{margin:0;background:#555}iframe{border:0;width:390px;height:844px;display:block}</style>
+<iframe id="f"></iframe>
+<script>
+  // Usage: phone.html#/route  -> loads the app at that route in a 390x844 frame
+  document.getElementById('f').src = '../index.html?nosw' + (location.hash || '#/');
+</script>
