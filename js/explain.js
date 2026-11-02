@@ -162,7 +162,8 @@ export function explainMove(fen, uci, analysis = {}) {
   // --- Follow-up in the engine line ---
   const { gain, plies } = lineGain(fen, pv, me);
   const hasTactic = reasons.some(r => r.includes('fork') || r.includes('checkmate'));
-  if (!hasTactic && gain > explainedGain && gain >= 1 && pv.length >= 2) {
+  const showsLine = !hasTactic && gain > explainedGain && gain >= 1 && pv.length >= 2;
+  if (showsLine) {
     add(`It sets up a tactic: ${movesInWords(fen, pv, plies)}, and you've won ${gainText(gain)}.`);
   }
 
@@ -201,5 +202,5 @@ export function explainMove(fen, uci, analysis = {}) {
         : cp < -300 ? `you're clearly worse (${s})` : cp < -100 ? `you're worse (${s})` : cp < -40 ? `you're slightly worse (${s})` : `about equal (${s})`;
     }
   }
-  return { san: m.san, reasons: reasons.slice(0, 3), line: pv.length > 1 ? movesInWords(fen, pv, 4) : '', eval: evalText };
+  return { san: m.san, reasons: reasons.slice(0, 3), line: pv.length > 1 && !showsLine ? movesInWords(fen, pv, 4) : '', eval: evalText }; // no line when the tactic reason already spells it out
 }

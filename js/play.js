@@ -488,7 +488,7 @@ export function renderGame(view) {
       if (!ex) { setCoach('💡 The engine suggests the arrow move.'); return; }
       setCoach(`💡 The engine suggests <b>${esc(ex.san)}</b>.
         <ul class="why">${ex.reasons.map(r => `<li>${r}</li>`).join('')}</ul>
-        ${ex.line || ex.eval ? `<div class="small muted">${ex.line ? `Likely next: ${ex.line}` : ''}${ex.line && ex.eval ? ' · ' : ''}${ex.eval ? `Then ${ex.eval}` : ''}</div>` : ''}`);
+        ${ex.line || ex.eval ? `<div class="small muted">${ex.line ? `Likely next: ${ex.line}` : ''}${ex.line && ex.eval ? ' · ' : ''}${ex.eval ? `${ex.line ? 'Then' : 'Overall'} ${ex.eval}` : ''}</div>` : ''}`);
     }
   }
 
