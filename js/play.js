@@ -4,6 +4,7 @@ import { Board, destsFrom, checkSquare } from './board.js';
 import { engine } from './engine.js';
 import { BOTS, botById, botMove } from './bots.js';
 import { loadOpenings, lookupOpening, isBook } from './openings.js';
+import { explainMove as explainEngineMove } from './explain.js';
 import {
   $, el, esc, store, sound, modal, confirmBox, toast, sleep, getSettings, setSetting,
   pieceImg, PIECE_VALUE, uciToMove, winPct, scoreToCp, fmtScore, classify, CLASS_LABEL,
@@ -470,6 +471,8 @@ export function renderGame(view) {
       if (!res || res.cancelled || !res.bestmove) res = await engine.analyse(chess.fen(), { depth: COACH_DEPTH });
       if (g !== st.gen || !res.bestmove) return;
       st.hintMove = uciToMove(res.bestmove);
+      st.hintUci = res.bestmove;
+      st.hintAnalysis = res;
     }
     const m = st.hintMove;
     const p = chess.get(m.from);
@@ -480,10 +483,12 @@ export function renderGame(view) {
       st.hintStep = 1;
     } else {
       board.setArrows([{ from: m.from, to: m.to, color: 'blue' }]);
-      const tmp = new Chess(chess.fen());
-      let san = '';
-      try { san = tmp.move(m).san; } catch { }
-      setCoach(`💡 The engine suggests <b>${esc(san)}</b>.`);
+      let ex = null;
+      try { ex = explainEngineMove(chess.fen(), st.hintUci, st.hintAnalysis); } catch (e) { console.error('explain failed', e); }
+      if (!ex) { setCoach('💡 The engine suggests the arrow move.'); return; }
+      setCoach(`💡 The engine suggests <b>${esc(ex.san)}</b>.
+        <ul class="why">${ex.reasons.map(r => `<li>${r}</li>`).join('')}</ul>
+        ${ex.line || ex.eval ? `<div class="small muted">${ex.line ? `Likely line: ${esc(ex.line)}` : ''}${ex.line && ex.eval ? ' · ' : ''}${ex.eval ? `Then ${ex.eval}` : ''}</div>` : ''}`);
     }
   }
 

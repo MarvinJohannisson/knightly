@@ -226,6 +226,8 @@ body.no-coords .board .coord { display: none; }
 .coach .avatar { width: 34px; height: 34px; font-size: 19px; background: #2f3a30; }
 .coach .msg { font-size: 14px; }
 .coach .msg b { font-weight: 700; }
+.coach .why { margin: 6px 0 4px; padding-left: 18px; }
+.coach .why li { margin: 2px 0; line-height: 1.35; }
 .coach .opening { font-size: 12px; color: var(--text-3); margin-top: 2px; }
 .tag { display: inline-block; padding: 1px 8px; border-radius: 6px; font-size: 12px; font-weight: 800; margin-right: 4px; color: #1c1b19; }
 .tag.best { background: var(--best); } .tag.good { background: var(--good); } .tag.inaccuracy { background: var(--inacc); }
