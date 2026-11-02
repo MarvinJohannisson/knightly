@@ -47,29 +47,33 @@ function mateThreat(chess) {
 }
 
 /** SAN for a list of UCI moves, with move numbers. */
-export function sanLine(fen, pv, max = 6) {
+/** A list of UCI moves as plain words (HTML): "you play Rb1, they reply Kg8, then you play dxc6". */
+export function movesInWords(fen, pv, max = 4) {
   const c = new Chess(fen);
-  let num = +fen.split(' ')[5] || 1;
   const out = [];
   for (const uci of pv.slice(0, max)) {
     let m;
     try { m = c.move(uciToMove(uci)); } catch { break; }
-    if (m.color === 'w') out.push(`${num}. ${m.san}`);
-    else { out.push(out.length ? m.san : `${num}… ${m.san}`); num++; }
+    const i = out.length;
+    out.push(`${i === 2 ? 'then ' : ''}${i % 2 ? 'they reply' : 'you play'} <b>${esc(m.san)}</b>`);
   }
-  return out.join(' ');
+  return out.join(', ');
 }
 
 /** Material the mover gains over the engine line (measured after the opponent's replies). */
 function lineGain(fen, pv, me) {
   const c = new Chess(fen);
   const base = material(c, me);
-  let gain = 0;
+  let gain = 0, plies = 0;
   for (let i = 0; i < Math.min(pv.length, 6); i++) {
     try { c.move(uciToMove(pv[i])); } catch { break; }
-    if (i % 2 === 1) gain = material(c, me) - base;
+    if (i % 2 === 1) {
+      const g = material(c, me) - base;
+      if (g !== gain) plies = i + 1; // shortest line that shows the final gain
+      gain = g;
+    }
   }
-  return gain;
+  return { gain, plies };
 }
 
 function gainText(g) {
@@ -156,10 +160,10 @@ export function explainMove(fen, uci, analysis = {}) {
   if (saved.length) add(`It protects your ${NAMES[c.get(saved[0]).type]} on ${saved[0]}, which was under attack.`);
 
   // --- Follow-up in the engine line ---
-  const gain = lineGain(fen, pv, me);
+  const { gain, plies } = lineGain(fen, pv, me);
   const hasTactic = reasons.some(r => r.includes('fork') || r.includes('checkmate'));
   if (!hasTactic && gain > explainedGain && gain >= 1 && pv.length >= 2) {
-    add(`It sets up a tactic: after <b>${esc(sanLine(fen, pv, 4))}</b> you win ${gainText(gain)}.`);
+    add(`It sets up a tactic: ${movesInWords(fen, pv, plies)}, and you've won ${gainText(gain)}.`);
   }
 
   // --- Positional ideas ---
@@ -197,5 +201,5 @@ export function explainMove(fen, uci, analysis = {}) {
         : cp < -300 ? `you're clearly worse (${s})` : cp < -100 ? `you're worse (${s})` : cp < -40 ? `you're slightly worse (${s})` : `about equal (${s})`;
     }
   }
-  return { san: m.san, reasons: reasons.slice(0, 3), line: pv.length > 1 ? sanLine(fen, pv, 5) : '', eval: evalText };
+  return { san: m.san, reasons: reasons.slice(0, 3), line: pv.length > 1 ? movesInWords(fen, pv, 4) : '', eval: evalText };
 }
