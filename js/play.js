@@ -105,9 +105,10 @@ export function renderGame(view) {
   const chess = new Chess();
   for (const u of data.moves) { try { chess.move(uciToMove(u)); } catch { break; } }
   data.moves = chess.history({ verbose: true }).map(m => m.lan);
+  data.picked = data.picked || {}; // plies where the player chose the bot's move
 
   const st = {
-    gen: 0, thinking: false, turnAnalysis: null, hintStep: 0, hintMove: null,
+    gen: 0, thinking: false, picking: false, turnAnalysis: null, hintStep: 0, hintMove: null,
     coachHtml: '', coachTag: '', destroyed: false,
   };
 
@@ -120,6 +121,7 @@ export function renderGame(view) {
     <div class="controls">
       <button class="ctl" id="hintBtn"><svg viewBox="0 0 24 24"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.4 1 1.1 1 1.8V16h5v-.3c0-.7.4-1.4 1-1.8A6 6 0 0 0 12 3z"/></svg>Hint</button>
       <button class="ctl" id="undoBtn"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg>Takeback</button>
+      <button class="ctl" id="pickBtn" title="Choose the bot's moves yourself" aria-pressed="false"><svg viewBox="0 0 24 24"><rect x="5" y="8" width="14" height="11" rx="3"/><path d="M12 8V4M10 13h.01M14 13h.01M9 19v2M15 19v2"/></svg>Bot move</button>
       <button class="ctl" id="flipBtn"><svg viewBox="0 0 24 24"><path d="M7 4v16M7 20l-3-3M7 20l3-3M17 20V4M17 4l-3 3M17 4l3 3"/></svg>Flip</button>
       <button class="ctl" id="reviewBtn"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg>Review</button>
       <button class="ctl" id="resignBtn"><svg viewBox="0 0 24 24"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></svg><span>Resign</span></button>
@@ -151,13 +153,13 @@ export function renderGame(view) {
     return { capturedBy, diff: score.w - score.b };
   }
 
-  function barHtml(name, sub, avatar, color, thinking) {
+  function barHtml(name, sub, avatar, color, thinking, picking) {
     const m = material();
     const caps = m.capturedBy[color];
     const adv = color === 'w' ? m.diff : -m.diff;
     const opp = color === 'w' ? 'b' : 'w';
     return `<div class="avatar">${avatar}</div><div class="grow">
-      <div><span class="name">${esc(name)}</span><span class="rating">${esc(sub)}</span>${thinking ? '<span class="thinking"><i></i><i></i><i></i></span>' : ''}</div>
+      <div><span class="name">${esc(name)}</span><span class="rating">${esc(sub)}</span>${thinking ? '<span class="thinking"><i></i><i></i><i></i></span>' : ''}${picking ? '<span class="pick-tag">Choose a move</span>' : ''}</div>
       <div class="captured">${caps.map(t => `<img src="${pieceImg(opp, t)}" alt="">`).join('')}${adv > 0 ? `<span class="adv">+${adv}</span>` : ''}</div>
     </div>`;
   }
@@ -165,7 +167,7 @@ export function renderGame(view) {
   function renderBars() {
     const botColor = data.playerColor === 'w' ? 'b' : 'w';
     const topIsBot = board.orientation === data.playerColor;
-    const botHtml = barHtml(bot.name, `~${bot.rating}`, bot.avatar, botColor, st.thinking);
+    const botHtml = barHtml(bot.name, `~${bot.rating}`, bot.avatar, botColor, st.thinking, st.picking);
     const meHtml = barHtml('You', '', '🙂', data.playerColor, false);
     $('#oppBar', view).innerHTML = topIsBot ? botHtml : meHtml;
     $('#meBar', view).innerHTML = topIsBot ? meHtml : botHtml;
@@ -177,9 +179,10 @@ export function renderGame(view) {
     for (let i = 0; i < hist.length; i++) {
       if (i % 2 === 0) html += `<span class="num">${i / 2 + 1}.</span>`;
       const mk = data.marks[i + 1];
+      const picked = data.picked[i + 1] ? 'picked' : '';
       const sym = mk === 'blunder' ? '??' : mk === 'mistake' ? '?' : mk === 'inaccuracy' ? '?!' : '';
       const col = mk ? `style="color:var(--${mk === 'inaccuracy' ? 'inacc' : mk})"` : '';
-      html += `<span class="mv ${i === hist.length - 1 ? 'cur' : ''}" ${col}>${esc(hist[i])}<span class="sym">${sym}</span></span>`;
+      html += `<span class="mv ${i === hist.length - 1 ? 'cur' : ''} ${picked}" ${col}>${esc(hist[i])}<span class="sym">${sym}</span></span>`;
     }
     const mv = $('#moves', view);
     mv.innerHTML = html;
@@ -221,7 +224,11 @@ export function renderGame(view) {
   function renderControls() {
     const over = !!data.result;
     $('#hintBtn', view).disabled = over || st.thinking || chess.turn() !== data.playerColor;
-    $('#undoBtn', view).disabled = chess.history().length === 0 || (data.playerColor === 'b' && chess.history().length <= 1);
+    $('#undoBtn', view).disabled = chess.history().length === 0 || (data.playerColor === 'b' && chess.history().length <= 1 && !data.pickBot);
+    const pick = $('#pickBtn', view);
+    pick.disabled = over;
+    pick.classList.toggle('on', !!data.pickBot);
+    pick.setAttribute('aria-pressed', String(!!data.pickBot));
     $('#reviewBtn', view).disabled = !over;
     $('#resignBtn span', view).textContent = over ? 'New game' : 'Resign';
   }
@@ -229,7 +236,8 @@ export function renderGame(view) {
   function renderBoard(lastMove, animate = true) {
     board.setPosition(chess.fen(), { lastMove, check: checkSquare(chess), animate });
     const myTurn = !data.result && chess.turn() === data.playerColor && !st.thinking;
-    board.setMovable(myTurn ? data.playerColor : null, destsFrom(chess));
+    const mover = st.picking && !data.result ? chess.turn() : myTurn ? data.playerColor : null;
+    board.setMovable(mover, destsFrom(chess));
   }
 
   function renderAll(lastMove, animate) {
@@ -241,6 +249,9 @@ export function renderGame(view) {
     const m = h[h.length - 1];
     return m ? [m.from, m.to] : null;
   }
+
+  // A game with chosen bot moves is an experiment, so it never counts in the stats.
+  function isWhatIf() { return Object.keys(data.picked).length > 0; }
 
   function save() { data.moves = chess.history({ verbose: true }).map(m => m.lan); store.set('game', data); }
 
@@ -258,8 +269,10 @@ export function renderGame(view) {
 
   function finish(r) {
     data.result = r;
+    st.picking = false;
     board.setMovable(null);
-    if (!data.recorded) {
+    const whatIf = isWhatIf();
+    if (!data.recorded && !whatIf) {
       data.recorded = true;
       const stats = store.get('stats', { games: 0, wins: 0, losses: 0, draws: 0, byBot: {} });
       stats.byBot = stats.byBot || {};
@@ -286,12 +299,13 @@ export function renderGame(view) {
       const v = await modal({
         title,
         body: `<p class="muted">${r.reason[0].toUpperCase() + r.reason.slice(1)} · vs ${esc(bot.name)} (~${bot.rating})</p>
-          ${won && bot.id !== 'titan' ? `<p>Nice! Ready for the next opponent? Try <b>${esc(BOTS[BOTS.indexOf(bot) + 1].name)}</b>.</p>` : ''}
-          ${!won && r.winner ? '<p>Every loss is a lesson. The game review shows your key mistakes.</p>' : ''}`,
+          ${whatIf ? `<p>You chose moves for ${esc(bot.name)}, so this game does not count in your stats.</p>` : ''}
+          ${won && !whatIf && bot.id !== 'titan' ? `<p>Nice! Ready for the next opponent? Try <b>${esc(BOTS[BOTS.indexOf(bot) + 1].name)}</b>.</p>` : ''}
+          ${!won && !whatIf && r.winner ? '<p>Every loss is a lesson. The game review shows your key mistakes.</p>' : ''}`,
         actions: [
           { label: 'Game review', cls: 'primary', value: 'review' },
           { label: 'Rematch', value: 'rematch' },
-          ...(won && bot.id !== 'titan' ? [{ label: `Play ${esc(BOTS[BOTS.indexOf(bot) + 1].name)}`, value: 'next' }] : []),
+          ...(won && !whatIf && bot.id !== 'titan' ? [{ label: `Play ${esc(BOTS[BOTS.indexOf(bot) + 1].name)}`, value: 'next' }] : []),
           { label: 'Close', cls: 'ghost', value: null },
         ],
       });
@@ -325,21 +339,24 @@ export function renderGame(view) {
   }
 
   async function onUserMove(from, to) {
+    const picking = st.picking;
     const piece = chess.get(from);
     let promotion;
     if (piece && piece.type === 'p' && (to[1] === '8' || to[1] === '1')) {
       promotion = getSettings().autoQueen ? 'q' : await board.promote(piece.color);
-      if (!promotion) { renderBoard(lastMoveSquares(), false); return; }
+      if (!promotion || picking !== st.picking) { renderBoard(lastMoveSquares(), false); return; }
     }
     let move;
     const fenBefore = chess.fen();
     try { move = chess.move({ from, to, promotion }); } catch { renderBoard(lastMoveSquares(), false); return; }
     sound.forMove(move, chess);
+    if (picking) { st.picking = false; data.picked[chess.history().length] = true; }
     board.setArrows([]);
     board.setMarks({});
     renderAll([move.from, move.to]);
     save();
     if (checkEnd()) return;
+    if (picking) { startPlayerTurn(); return; }
     await coachAndReply(move, fenBefore);
   }
 
@@ -421,6 +438,7 @@ export function renderGame(view) {
   }
 
   async function botTurn() {
+    if (data.pickBot) { st.picking = true; renderAll(lastMoveSquares(), false); return; }
     const g = st.gen;
     st.thinking = true; renderBars(); renderControls();
     board.setMovable(null);
@@ -447,10 +465,13 @@ export function renderGame(view) {
     engine.stop();
     st.gen++;
     st.thinking = false;
-    do { chess.undo(); } while (chess.history().length > 0 && chess.turn() !== data.playerColor);
+    st.picking = false;
+    // While choosing the bot's moves, step back one move at a time so either side can be replayed.
+    do { chess.undo(); } while (!data.pickBot && chess.history().length > 0 && chess.turn() !== data.playerColor);
     const ply = chess.history().length;
     for (const k of Object.keys(data.marks)) if (+k > ply) delete data.marks[k];
     for (const k of Object.keys(data.evals)) if (+k > ply) delete data.evals[k];
+    for (const k of Object.keys(data.picked)) if (+k > ply) delete data.picked[k];
     data.result = null; data.recorded = data.recorded; // a finished game stays recorded
     data.takebacks++;
     board.setArrows([]);
@@ -458,6 +479,21 @@ export function renderGame(view) {
     renderAll(lastMoveSquares());
     save();
     if (chess.turn() !== data.playerColor) botTurn(); else startPlayerTurn();
+  }
+
+  function togglePick() {
+    if (data.result) return;
+    data.pickBot = !data.pickBot;
+    toast(data.pickBot ? `You choose ${bot.name}'s moves. Takeback now goes back one move at a time.` : `${bot.name} plays on its own again`);
+    if (data.pickBot && st.thinking) {
+      engine.stop(); st.gen++; st.thinking = false;
+      botTurn();
+    } else if (!data.pickBot && st.picking) {
+      st.picking = false;
+      botTurn();
+    }
+    renderControls();
+    save();
   }
 
   async function hint() {
@@ -495,6 +531,7 @@ export function renderGame(view) {
   // ---------- buttons ----------
   $('#hintBtn', view).addEventListener('click', hint);
   $('#undoBtn', view).addEventListener('click', undo);
+  $('#pickBtn', view).addEventListener('click', togglePick);
   $('#flipBtn', view).addEventListener('click', () => { board.flip(); renderBars(); renderEval(); });
   $('#reviewBtn', view).addEventListener('click', () => { location.hash = '#/review'; });
   $('#resignBtn', view).addEventListener('click', async () => {
@@ -525,7 +562,7 @@ export function renderGame(view) {
     engine.newGame();
     if (chess.turn() !== data.playerColor) botTurn(); else startPlayerTurn();
   } else {
-    setCoach('Welcome back! Your move.');
+    setCoach(chess.turn() === data.playerColor ? 'Welcome back! Your move.' : 'Welcome back!');
     if (chess.turn() !== data.playerColor) botTurn(); else startPlayerTurn();
   }
 

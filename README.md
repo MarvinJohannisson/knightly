@@ -2,7 +2,7 @@
 
 A mobile-first chess app that runs entirely in the browser (no server, no account, works offline once loaded).
 
-- **Play**: 10 bots from ~400 to full-strength Stockfish, with a coach that grades your moves, hints, takebacks, live opening names and a full game review with accuracy.
+- **Play**: 10 bots from ~400 to full-strength Stockfish, with a coach that grades your moves, hints, takebacks, live opening names and a full game review with accuracy. Turn on **Bot move** during a game to choose the bot's replies yourself and see how a line plays out (such games don't count in your stats).
 - **Puzzles**: 4,232 rated puzzles from the Lichess database with your own puzzle rating, practice by theme, hints and explanations.
 - **Learn**: 20 interactive lessons (basics, opening principles, tactics, mating patterns, endgames, thinking habits) and 11 opening courses you can practise move by move.
 

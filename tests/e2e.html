@@ -67,6 +67,45 @@ async function run() {
   await sleep(600);
   log(read('game').moves.length === before - 2, `takeback removes two plies (${before} -> ${read('game').moves.length})`);
 
+  // ---------- choosing the bot's moves ----------
+  const freshGame = started => ({ botId: 'pip', playerColor: 'w', moves: [], evals: {}, marks: {}, result: null, recorded: false, hints: 0, takebacks: 0, started });
+  store('game', freshGame(2));
+  await go('#/play'); await go('#/game');
+  await waitFor(() => D().querySelector('#pickBtn'));
+  D().querySelector('#pickBtn').click();
+  log(D().querySelector('#pickBtn').classList.contains('on'), 'bot move toggle turns on');
+  await sleep(500);
+  await move('f2', 'f3');
+  await waitFor(() => D().querySelector('.pick-tag'), 15000);
+  log(!!D().querySelector('.pick-tag') && read('game').moves.length === 1, 'bot waits for a chosen move');
+  await move('e7', 'e6');
+  log(read('game').moves.join(' ') === 'f2f3 e7e6', 'chosen bot move is played: ' + read('game').moves.join(' '));
+  D().querySelector('#undoBtn').click();
+  await waitFor(() => D().querySelector('.pick-tag'), 15000);
+  log(read('game').moves.join(' ') === 'f2f3', 'takeback undoes only the chosen bot move');
+  await move('e7', 'e5');
+  await sleep(500);
+  await move('g2', 'g4');
+  await waitFor(() => D().querySelector('.pick-tag'), 15000);
+  const statsBefore = JSON.stringify(read('stats'));
+  await move('d8', 'h4');
+  const mated = await waitFor(() => read('game').result, 5000);
+  log(mated && mated.winner === 'b', 'chosen bot move can end the game');
+  log(JSON.stringify(read('stats')) === statsBefore, 'what-if game is not counted in stats');
+  const endModal = await waitFor(() => D().querySelector('.modal'), 3000);
+  log(/does not count/.test(endModal && endModal.textContent), 'end screen says the game is not counted');
+  endModal?.querySelector('.btn.ghost').click();
+  store('game', freshGame(3));
+  await go('#/play'); await go('#/game');
+  await waitFor(() => D().querySelector('#pickBtn'));
+  await sleep(500);
+  D().querySelector('#pickBtn').click();
+  await move('e2', 'e4');
+  await waitFor(() => D().querySelector('.pick-tag'), 15000);
+  D().querySelector('#pickBtn').click();
+  g = await waitFor(() => { const x = read('game'); return x && x.moves.length >= 2 ? x : null; }, 20000);
+  log(!!g, 'turning the toggle off lets the bot reply: ' + (g && g.moves.join(' ')));
+
   // ---------- review of a finished game (fool's mate) ----------
   store('game', { botId: 'theo', playerColor: 'w', moves: ['f2f3', 'e7e5', 'g2g4', 'd8h4'], evals: {}, marks: {}, result: { winner: 'b', reason: 'checkmate' }, recorded: true, hints: 0, takebacks: 0, started: 1 });
   await go('#/review');
