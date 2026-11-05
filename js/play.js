@@ -59,11 +59,11 @@ export function renderPlaySetup(view) {
   const paint = () => {
     view.querySelectorAll('.bot').forEach(b => b.classList.toggle('sel', b.dataset.id === sel));
     const b = botById(sel);
-    const r = stats.byBot?.[b.id] || { w: 0, l: 0, d: 0 };
+    const r = { w: 0, l: 0, d: 0, h: 0, ...stats.byBot?.[b.id] };
     $('#botDesc', view).innerHTML = `<div class="row"><div class="avatar">${b.avatar}</div><div class="grow">
       <div style="font-weight:750">${esc(b.name)} <span class="muted small">~${b.rating} · ${esc(b.style)}</span></div>
       <div class="muted small">${esc(b.desc)}</div>
-      ${r.w + r.l + r.d ? `<div class="small" style="margin-top:4px">Your score: <b>${r.w}</b> W · <b>${r.d}</b> D · <b>${r.l}</b> L</div>` : ''}
+      ${r.w + r.h + r.l + r.d ? `<div class="small" style="margin-top:4px">Your score: <b>${r.w}</b> W · <b>${r.d}</b> D · <b>${r.l}</b> L${r.h ? ` · <b>${r.h}</b> won with help` : ''}</div>` : ''}
     </div></div>`;
     view.querySelectorAll('#colorSeg button').forEach(x => x.classList.toggle('on', x.dataset.c === color));
   };
@@ -272,6 +272,7 @@ export function renderGame(view) {
     st.picking = false;
     board.setMovable(null);
     const whatIf = isWhatIf();
+    const helped = data.takebacks + data.hints > 0;
     if (!data.recorded && !whatIf) {
       data.recorded = true;
       const stats = store.get('stats', { games: 0, wins: 0, losses: 0, draws: 0, byBot: {} });
@@ -279,6 +280,7 @@ export function renderGame(view) {
       const b = stats.byBot[bot.id] || { w: 0, l: 0, d: 0 };
       stats.games = (stats.games || 0) + 1;
       if (!r.winner) { stats.draws = (stats.draws || 0) + 1; b.d++; }
+      else if (r.winner === data.playerColor && helped) { stats.helpedWins = (stats.helpedWins || 0) + 1; b.h = (b.h || 0) + 1; }
       else if (r.winner === data.playerColor) { stats.wins = (stats.wins || 0) + 1; b.w++; }
       else { stats.losses = (stats.losses || 0) + 1; b.l++; }
       stats.byBot[bot.id] = b;
@@ -292,6 +294,9 @@ export function renderGame(view) {
     renderControls();
     sound.play('end');
     const won = r.winner === data.playerColor;
+    const cleanWin = won && !whatIf && !helped;
+    const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+    const help = [data.takebacks && plural(data.takebacks, 'takeback'), data.hints && plural(data.hints, 'hint')].filter(Boolean).join(' and ');
     const title = !r.winner ? 'Draw' : won ? 'You won! 🎉' : `${esc(bot.name)} won`;
     setCoach(`<b>${title}</b> by ${r.reason}. Review the game to see where it turned.`);
     setTimeout(async () => {
@@ -300,12 +305,13 @@ export function renderGame(view) {
         title,
         body: `<p class="muted">${r.reason[0].toUpperCase() + r.reason.slice(1)} · vs ${esc(bot.name)} (~${bot.rating})</p>
           ${whatIf ? `<p>You chose moves for ${esc(bot.name)}, so this game does not count in your stats.</p>` : ''}
-          ${won && !whatIf && bot.id !== 'titan' ? `<p>Nice! Ready for the next opponent? Try <b>${esc(BOTS[BOTS.indexOf(bot) + 1].name)}</b>.</p>` : ''}
+          ${won && !whatIf && helped ? `<p>You used ${help}, so this counts as a win with help. Try beating ${esc(bot.name)} on your own next!</p>` : ''}
+          ${cleanWin && bot.id !== 'titan' ? `<p>Nice! Ready for the next opponent? Try <b>${esc(BOTS[BOTS.indexOf(bot) + 1].name)}</b>.</p>` : ''}
           ${!won && !whatIf && r.winner ? '<p>Every loss is a lesson. The game review shows your key mistakes.</p>' : ''}`,
         actions: [
           { label: 'Game review', cls: 'primary', value: 'review' },
           { label: 'Rematch', value: 'rematch' },
-          ...(won && !whatIf && bot.id !== 'titan' ? [{ label: `Play ${esc(BOTS[BOTS.indexOf(bot) + 1].name)}`, value: 'next' }] : []),
+          ...(cleanWin && bot.id !== 'titan' ? [{ label: `Play ${esc(BOTS[BOTS.indexOf(bot) + 1].name)}`, value: 'next' }] : []),
           { label: 'Close', cls: 'ghost', value: null },
         ],
       });

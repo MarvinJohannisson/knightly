@@ -27,6 +27,7 @@ With the app served locally, open:
 - `tests/test.html` checks every lesson position and solution against Stockfish, the opening lines, the puzzle data and the bots.
 - `tests/e2e.html` plays through the app like a user (game, coach, hint, takeback, review, lessons, puzzle, course).
 - `tests/phone.html#/route` previews a screen at phone size.
+- `tests/calibrate.html` measures bot strength with matches and rated puzzles (slow; `?workers=N` runs engines in parallel).
 
 ## Structure
 

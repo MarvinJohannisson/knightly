@@ -83,9 +83,10 @@ function renderRecent() {
     const b = botById(g.botId);
     const r = g.result;
     const res = !r ? '–' : !r.winner ? '½' : r.winner === g.playerColor ? 'Won' : 'Lost';
+    const helped = res === 'Won' && g.takebacks + g.hints > 0;
     const col = res === 'Won' ? 'var(--accent)' : res === 'Lost' ? 'var(--bad)' : 'var(--text-2)';
     return `<a class="lesson-item" href="#/review/a${i}"><div class="n">${b.avatar}</div>
-      <div class="grow"><div class="t">vs ${esc(b.name)} <span class="muted small">~${b.rating}</span></div><div class="s">${r ? esc(r.reason) : ''} · ${Math.ceil(g.moves.length / 2)} moves · tap to review</div></div>
+      <div class="grow"><div class="t">vs ${esc(b.name)} <span class="muted small">~${b.rating}</span></div><div class="s">${r ? esc(r.reason) : ''}${helped ? ' · with help' : ''} · ${Math.ceil(g.moves.length / 2)} moves · tap to review</div></div>
       <div style="font-weight:800;color:${col}">${res}</div></a>`;
   }).join('')}</div>`;
 }
@@ -113,8 +114,14 @@ function renderSettings(v) {
     </div>
     <div class="section-title">Data</div>
     <div class="card">
-      <p class="small muted" style="margin-top:0">Your progress is stored only on this device.</p>
-      <button class="btn danger block" id="resetBtn">Reset all progress</button>
+      <p class="small muted" style="margin-top:0">Your progress is stored only on this device. Save a backup file to keep it safe or move it to another device.</p>
+      <p class="small muted" id="lastBackup"></p>
+      <div class="stack">
+        <button class="btn block" id="backupBtn">Save a backup</button>
+        <button class="btn block" id="restoreBtn">Restore from a backup</button>
+        <input type="file" id="restoreFile" accept=".json,application/json" hidden>
+        <button class="btn danger block" id="resetBtn">Reset all progress</button>
+      </div>
     </div>
     <div class="section-title">About</div>
     <div class="card credits">
@@ -126,11 +133,60 @@ function renderSettings(v) {
     </div>`;
   v.querySelectorAll('input[data-k]').forEach(i => i.addEventListener('change', () => setSetting(i.dataset.k, i.checked)));
   $('#boardSel', v).addEventListener('change', e => setSetting('board', e.target.value));
+  const showLastBackup = () => {
+    const t = store.get('lastBackup', null);
+    $('#lastBackup', v).textContent = t ? `Last backup: ${new Date(t).toLocaleDateString()}` : 'No backup saved yet.';
+  };
+  showLastBackup();
+  $('#backupBtn', v).addEventListener('click', async () => { if (await saveBackup()) showLastBackup(); });
+  $('#restoreBtn', v).addEventListener('click', () => $('#restoreFile', v).click());
+  $('#restoreFile', v).addEventListener('change', async e => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (file) await restoreBackup(file);
+  });
   $('#resetBtn', v).addEventListener('click', async () => {
     if (await confirmBox('Reset everything?', '<p class="muted">Games, puzzle rating, lessons and settings will be deleted from this device.</p>', 'Reset')) {
       store.clearAll(); applySettings(); toast('Progress reset'); route();
     }
   });
+}
+
+// ======================= Backup =======================
+/** Saves all progress to a file. Returns false if the player cancelled. */
+async function saveBackup() {
+  const now = new Date();
+  store.set('lastBackup', now.getTime());
+  const text = JSON.stringify({ app: 'knightly', version: 1, saved: now.toISOString(), data: store.exportAll() });
+  const file = new File([text], `knightly-backup-${now.toISOString().slice(0, 10)}.json`, { type: 'application/json' });
+  // Downloads are unreliable in installed phone apps, so use the share sheet there.
+  if (matchMedia('(pointer: coarse)').matches && navigator.canShare?.({ files: [file] })) {
+    try { await navigator.share({ files: [file] }); }
+    catch (e) { if (e.name === 'AbortError') return false; toast('Could not save the backup'); return false; }
+  } else {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(file);
+    a.download = file.name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  }
+  toast('Backup saved');
+  return true;
+}
+
+async function restoreBackup(file) {
+  let backup = null;
+  try {
+    backup = JSON.parse(await file.text());
+    Object.values(backup.data).forEach(v => JSON.parse(v));
+  } catch { backup = null; }
+  if (backup?.app !== 'knightly') { toast('That is not a Knightly backup file'); return; }
+  const when = new Date(backup.saved).toLocaleDateString();
+  if (!await confirmBox('Restore this backup?', `<p class="muted">Saved on ${esc(when)}. Everything currently on this device will be replaced.</p>`, 'Restore')) return;
+  try { store.importAll(backup.data); } catch { toast('Could not restore the backup'); return; }
+  applySettings();
+  route();
+  toast('Backup restored');
 }
 
 // ======================= Boot =======================
@@ -139,6 +195,21 @@ window.addEventListener('hashchange', route);
 applySettings();
 route();
 
+function showUpdateBar() {
+  if ($('#updateBar')) return;
+  const bar = document.createElement('button');
+  bar.id = 'updateBar';
+  bar.className = 'update-bar';
+  bar.textContent = 'New version available. Tap to update.';
+  bar.addEventListener('click', () => location.reload());
+  document.body.appendChild(bar);
+}
+
 if ('serviceWorker' in navigator && location.protocol !== 'file:' && !location.search.includes('nosw')) {
-  navigator.serviceWorker.register('sw.js').catch(() => { });
+  const hadWorker = !!navigator.serviceWorker.controller; // the very first install is not an update
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadWorker) showUpdateBar(); });
+  navigator.serviceWorker.register('sw.js').then(reg => {
+    // An installed app can stay open for days, so look for updates whenever it comes back.
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) reg.update().catch(() => { }); });
+  }).catch(() => { });
 }

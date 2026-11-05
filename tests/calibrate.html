@@ -1,0 +1,151 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Knightly calibration</title>
+<pre id="out">running…</pre>
+<script type="module">
+// Measures bot strength: matches between neighbouring bots give the rating gaps, and solving
+// rated Lichess puzzles gives a rough outside anchor. Takes a while; ?workers=N sets parallel engines.
+import { Chess } from '../vendor/chess.js';
+import { Engine } from '../js/engine.js';
+import { BOTS, botMove } from '../js/bots.js';
+import { uciToMove, PIECE_VALUE } from '../js/util.js';
+
+const params = new URLSearchParams(location.search);
+const WORKERS = +params.get('workers') || 4;
+const MAX_PLIES = 300;
+const GAMES = { pip: 60, rosa: 60, theo: 60, mila: 60, viktor: 60, ingrid: 40, kasper: 40, selma: 32, orion: 32 }; // vs the next bot up
+const PUZZLES = { selma: 100, orion: 100, titan: 100 }; // per bot, 150 otherwise
+
+const cal = window.cal = { started: Date.now(), done: 0, total: 0, finished: false, pairs: {}, puzzles: {}, errors: [] };
+
+function material(c) {
+  let n = 0;
+  for (const row of c.board()) for (const p of row) if (p && p.type !== 'k') n += (p.color === 'w' ? 1 : -1) * PIECE_VALUE[p.type];
+  return n;
+}
+
+/** Plays one game from `start` (SAN list). Returns 1, 0.5 or 0 from White's point of view, plus plies. */
+async function playGame(eng, white, black, start) {
+  const c = new Chess();
+  for (const s of start) c.move(s);
+  eng.newGame();
+  const strong = white.cfg.skill != null && black.cfg.skill != null;
+  for (let ply = start.length; ; ply++) {
+    if (c.isCheckmate()) return { score: c.turn() === 'w' ? 0 : 1, ply };
+    if (c.isDraw()) return { score: 0.5, ply };
+    const m = material(c);
+    if (strong && ply > 40 && Math.abs(m) >= 9) return { score: m > 0 ? 1 : 0, ply }; // a lost position, saves time
+    if (ply >= MAX_PLIES) return { score: Math.abs(m) >= 5 ? (m > 0 ? 1 : 0) : 0.5, ply };
+    const uci = await botMove(c.turn() === 'w' ? white : black, c, eng);
+    c.move(uciToMove(uci));
+  }
+}
+
+async function solvePuzzle(eng, bot, p) {
+  const ms = p.m.trim().split(/\s+/);
+  const c = new Chess(p.fen);
+  c.move(uciToMove(ms[0]));
+  const sol = ms.slice(1);
+  eng.newGame();
+  for (let i = 0; i < sol.length; i += 2) {
+    const uci = await botMove(bot, c, eng);
+    c.move(uciToMove(uci));
+    if (uci !== sol[i] && !c.isCheckmate()) return false;
+    if (c.isCheckmate()) return true;
+    if (i + 1 < sol.length) c.move(uciToMove(sol[i + 1]));
+  }
+  return true;
+}
+
+const eloDiff = s => -400 * Math.log10(1 / Math.min(Math.max(s, 0.005), 0.995) - 1);
+
+/** Rating with the highest likelihood of these results, using the Elo curve. */
+function puzzleRating(results) {
+  let best = 0, bestLl = -Infinity;
+  for (let R = 0; R <= 3500; R += 10) {
+    let ll = 0;
+    for (const { r, ok } of results) {
+      const p = 1 / (1 + Math.pow(10, (r - R) / 400));
+      ll += Math.log(Math.min(Math.max(ok ? p : 1 - p, 1e-6), 1));
+    }
+    if (ll > bestLl) { bestLl = ll; best = R; }
+  }
+  return best;
+}
+
+function report() {
+  const out = [`${cal.finished ? 'FINISHED' : 'RUNNING'} ${cal.done}/${cal.total} tasks, ${Math.round((Date.now() - cal.started) / 60000)} min, ${WORKERS} workers`, '', 'Neighbouring bots (stronger bot\'s score):'];
+  let chain = BOTS[0].rating;
+  BOTS.slice(0, -1).forEach((b, i) => {
+    const up = BOTS[i + 1];
+    const r = cal.pairs[b.id];
+    if (!r || !r.n) { out.push(`${b.name} vs ${up.name}: no games yet`); return; }
+    const s = (r.w + r.d / 2) / r.n;
+    const se = Math.sqrt(Math.max(s * (1 - s), 0.01) / r.n);
+    const gap = eloDiff(s);
+    chain += gap;
+    out.push(`${up.name} vs ${b.name}: +${r.w} =${r.d} -${r.l} of ${r.n}, ${(s * 100).toFixed(0)}%, gap ${Math.round(gap)} (range ${Math.round(eloDiff(s - 2 * se))} to ${Math.round(eloDiff(s + 2 * se))}), claimed ${up.rating - b.rating}, avg ${Math.round(r.plies / r.n)} plies, chain ${Math.round(chain)}`);
+  });
+  out.push('', 'Puzzle performance:');
+  for (const b of BOTS) {
+    const r = cal.puzzles[b.id] || [];
+    if (r.length) out.push(`${b.name} (~${b.rating}): ${r.filter(x => x.ok).length}/${r.length} solved, performance ${puzzleRating(r)}`);
+  }
+  if (cal.errors.length) out.push('', 'Errors: ' + cal.errors.slice(0, 5).join(' | '));
+  cal.report = out.join('\n');
+  document.getElementById('out').textContent = cal.report;
+  try { localStorage.setItem('calibration', JSON.stringify({ ...cal, report: cal.report })); } catch { }
+}
+
+async function run() {
+  const [openings, puzzles] = await Promise.all([
+    fetch('../data/openings.json').then(r => r.json()),
+    fetch('../data/puzzles.json').then(r => r.json()),
+  ]);
+  const lines = Object.keys(openings).map(k => k.split(' ')).filter(l => l.length >= 2 && l.length <= 6);
+  puzzles.sort((a, b) => a.r - b.r);
+
+  const tasks = [];
+  // Most expensive first, so the parallel engines finish together.
+  for (let i = BOTS.length - 2; i >= 0; i--) {
+    const low = BOTS[i], high = BOTS[i + 1];
+    cal.pairs[low.id] = { w: 0, d: 0, l: 0, n: 0, plies: 0 };
+    for (let g = 0; g < GAMES[low.id]; g += 2) {
+      const start = lines[Math.floor(Math.random() * lines.length)];
+      for (const highWhite of [true, false]) {
+        tasks.push(async eng => {
+          const { score, ply } = await playGame(eng, highWhite ? high : low, highWhite ? low : high, start);
+          const s = highWhite ? score : 1 - score; // from the stronger bot's side
+          const r = cal.pairs[low.id];
+          r.n++; r.plies += ply;
+          if (s === 1) r.w++; else if (s === 0) r.l++; else r.d++;
+        });
+      }
+    }
+  }
+  for (const b of [...BOTS].reverse()) {
+    cal.puzzles[b.id] = [];
+    const n = PUZZLES[b.id] || 150;
+    for (let k = 0; k < n; k++) {
+      const p = puzzles[Math.floor((k + 0.5) / n * puzzles.length)];
+      tasks.push(async eng => { cal.puzzles[b.id].push({ r: p.r, ok: await solvePuzzle(eng, b, p) }); });
+    }
+  }
+
+  cal.total = tasks.length;
+  let next = 0;
+  await Promise.all(Array.from({ length: WORKERS }, async () => {
+    const eng = new Engine();
+    await eng.init();
+    while (next < tasks.length) {
+      const task = tasks[next++];
+      try { await task(eng); } catch (e) { cal.errors.push(String(e)); }
+      cal.done++;
+      if (cal.done % 5 === 0) report();
+    }
+  }));
+  cal.finished = true;
+  report();
+}
+run().catch(e => { document.getElementById('out').textContent = 'CRASH ' + e.stack; });
+</script>

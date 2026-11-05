@@ -31,6 +31,18 @@ export const store = {
   clearAll() {
     try { Object.keys(localStorage).filter(k => k.startsWith(PREFIX)).forEach(k => localStorage.removeItem(k)); } catch { }
   },
+  /** Everything the app has stored, as { key: raw JSON string }. */
+  exportAll() {
+    const data = {};
+    for (const k of Object.keys(localStorage)) if (k.startsWith(PREFIX)) data[k.slice(PREFIX.length)] = localStorage.getItem(k);
+    return data;
+  },
+  /** Replaces all stored data. Puts the old data back and rethrows if it does not fit. */
+  importAll(data) {
+    const old = this.exportAll();
+    const write = d => { this.clearAll(); for (const [k, v] of Object.entries(d)) localStorage.setItem(PREFIX + k, v); };
+    try { write(data); } catch (e) { write(old); throw e; }
+  },
 };
 
 // ---------- Settings ----------

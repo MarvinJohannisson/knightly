@@ -135,6 +135,11 @@ svg { display: block; }
 
 select.select { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; }
 
+.update-bar {
+  position: fixed; left: 12px; right: 12px; bottom: calc(var(--tab-h) + 10px + env(safe-area-inset-bottom, 0px)); z-index: 55;
+  max-width: 536px; margin: 0 auto; padding: 12px 16px; border: 0; border-radius: 12px; cursor: pointer;
+  background: var(--accent); color: var(--accent-ink); font: inherit; font-weight: 700; box-shadow: 0 8px 30px rgba(0,0,0,.4);
+}
 .toast {
   position: fixed; left: 50%; bottom: calc(var(--tab-h) + 18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%);
   background: #f1eee9; color: #1c1b19; padding: 10px 16px; border-radius: 12px; font-weight: 600; z-index: 60;

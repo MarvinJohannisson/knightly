@@ -106,12 +106,70 @@ async function run() {
   g = await waitFor(() => { const x = read('game'); return x && x.moves.length >= 2 ? x : null; }, 20000);
   log(!!g, 'turning the toggle off lets the bot reply: ' + (g && g.moves.join(' ')));
 
+  // ---------- wins with and without help ----------
+  const mateGame = (hints, started) => ({ botId: 'theo', playerColor: 'b', moves: ['f2f3', 'e7e5', 'g2g4'], evals: {}, marks: {}, result: null, recorded: false, hints, takebacks: 0, started });
+  async function winByMate(game) {
+    store('game', game);
+    await go('#/play'); await go('#/game');
+    await waitFor(() => D().querySelector('#pickBtn'));
+    await sleep(800);
+    await move('d8', 'h4', 'b');
+    const modal = await waitFor(() => D().querySelector('.modal'), 5000);
+    const text = modal ? modal.textContent : '';
+    modal?.querySelector('.btn.ghost').click();
+    return text;
+  }
+  const helpedText = await winByMate(mateGame(1, 6));
+  let st = read('stats');
+  log(/win with help/.test(helpedText) && st.helpedWins === 1 && !st.wins, 'a win with a hint counts as a win with help');
+  log(!/Ready for the next/.test(helpedText), 'no next-bot suggestion after a win with help');
+  const cleanText = await winByMate(mateGame(0, 7));
+  st = read('stats');
+  log(st.wins === 1 && st.helpedWins === 1 && /Ready for the next/.test(cleanText), 'a win without help counts as a clean win');
+  await go('#/play');
+  D().querySelector('.bot[data-id="theo"]').click();
+  log(/1 won with help/.test(D().querySelector('#botDesc').textContent), 'bot card shows wins with help');
+
+  // ---------- backup and restore ----------
+  await go('#/settings');
+  let blob = null;
+  W().URL.createObjectURL = b => { blob = b; return 'blob:test'; };
+  const anchorClick = W().HTMLAnchorElement.prototype.click;
+  W().HTMLAnchorElement.prototype.click = () => { };
+  log(/No backup/.test(D().querySelector('#lastBackup').textContent), 'settings shows no backup yet');
+  D().querySelector('#backupBtn').click();
+  await waitFor(() => blob, 3000);
+  W().HTMLAnchorElement.prototype.click = anchorClick;
+  log(/Last backup/.test(D().querySelector('#lastBackup').textContent), 'settings shows the last backup date');
+  const backupText = await blob.text();
+  const statsSaved = read('stats');
+  store('stats', { games: 99 });
+  const restore = async text => {
+    const dt = new (W().DataTransfer)();
+    dt.items.add(new (W().File)([text], 'backup.json', { type: 'application/json' }));
+    const input = D().querySelector('#restoreFile');
+    input.files = dt.files;
+    input.dispatchEvent(new (W().Event)('change', { bubbles: true }));
+  };
+  await restore('{"not":"ours"}');
+  await sleep(300);
+  log(read('stats').games === 99 && !D().querySelector('.modal'), 'a wrong file is refused');
+  await restore(backupText);
+  const ask = await waitFor(() => D().querySelector('.modal'), 3000);
+  log(/replaced/.test(ask && ask.textContent), 'restore asks first');
+  [...ask.querySelectorAll('button')].find(b => b.textContent === 'Restore').click();
+  await sleep(300);
+  log(JSON.stringify(read('stats')) === JSON.stringify(statsSaved), 'restore brings the data back');
+
   // ---------- review of a finished game (fool's mate) ----------
   store('game', { botId: 'theo', playerColor: 'w', moves: ['f2f3', 'e7e5', 'g2g4', 'd8h4'], evals: {}, marks: {}, result: { winner: 'b', reason: 'checkmate' }, recorded: true, hints: 0, takebacks: 0, started: 1 });
   await go('#/review');
   const sum = await waitFor(() => /accuracy/i.test(D().querySelector('#summary').textContent) && D().querySelector('#summary').textContent, 30000);
   log(!!sum, 'review summary: ' + (sum || '').replace(/\s+/g, ' ').slice(0, 120));
   log(/Blunder/.test(sum || ''), 'review flags blunders');
+  D().querySelector('#nextMistake').click(); // 1.f3 is graded too now
+  await sleep(100);
+  log(/You played 1. f3/.test(D().querySelector('#comment').textContent), 'a dubious opening is graded, not book');
   D().querySelector('#nextMistake').click();
   await sleep(200);
   const why = D().querySelector('#comment');
@@ -172,7 +230,7 @@ async function run() {
   await sleep(200);
   await move('d2', 'd3');
   await waitFor(() => /Not quite|Found it/.test(comment()), 15000);
-  log(/works well too/.test(comment()), 'a good second-choice move is accepted: ' + comment().replace(/\s+/g, ' ').slice(0, 80));
+  log(/Found it/.test(comment()), 'a sound move is accepted even if not the first choice: ' + comment().replace(/\s+/g, ' ').slice(0, 80));
   act('Next');
   await sleep(200);
   act('Back to review');

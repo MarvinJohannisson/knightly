@@ -10,6 +10,7 @@ import {
 } from './util.js';
 
 const REVIEW_DEPTH = 10;
+const RETRY_DEPTH = 12; // at depth 10, noise can reject sound moves
 const SYM = { inaccuracy: '?!', mistake: '?', blunder: '??' };
 const MATE_CP = 9000; // scoreToCp puts forced mates beyond this
 
@@ -337,7 +338,7 @@ export function renderReview(view, param) {
   function evalAfter(c) {
     if (c.isCheckmate()) return { score: { mate: c.turn() === 'w' ? -1 : 1 }, bestmove: null, lines: [] };
     if (c.isDraw()) return { score: { cp: 0 }, bestmove: null, lines: [] };
-    return engine.analyse(c.fen(), { depth: REVIEW_DEPTH });
+    return engine.analyse(c.fen(), { depth: RETRY_DEPTH });
   }
 
   // A try is compared with the position after the best move, so both scores come from

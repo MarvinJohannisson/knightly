@@ -1,5 +1,5 @@
 // Offline support: precache the app, then serve from cache and refresh in the background.
-const VERSION = 'knightly-v7';
+const VERSION = 'knightly-v8';
 const CORE = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/app.js', 'js/util.js', 'js/board.js', 'js/engine.js', 'js/bots.js', 'js/play.js', 'js/review.js',
@@ -11,7 +11,8 @@ const CORE = [
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(VERSION).then(c => c.addAll(CORE)).then(() => self.skipWaiting()));
+  // Skip the HTTP cache, or a new version could be stored with old files.
+  e.waitUntil(caches.open(VERSION).then(c => c.addAll(CORE.map(u => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', e => {
