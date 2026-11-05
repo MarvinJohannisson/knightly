@@ -77,6 +77,9 @@ class Engine {
     const job = this.queue.shift();
     this.current = job;
     this._setOption('Skill Level', job.skill ?? 20);
+    // Contempt favours the side to move, which would make every move look like it loses ~65cp.
+    // Only the skill-level bots keep the default, so they still play on rather than take draws.
+    this._setOption('Contempt', job.skill == null ? 0 : 24);
     this._setOption('MultiPV', job.multipv || 1);
     this._send('position fen ' + job.fen);
     let go = 'go';

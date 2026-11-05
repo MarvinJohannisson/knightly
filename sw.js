@@ -1,5 +1,5 @@
 // Offline support: precache the app, then serve from cache and refresh in the background.
-const VERSION = 'knightly-v5';
+const VERSION = 'knightly-v6';
 const CORE = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/app.js', 'js/util.js', 'js/board.js', 'js/engine.js', 'js/bots.js', 'js/play.js', 'js/review.js',

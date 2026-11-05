@@ -84,6 +84,23 @@ function gainText(g) {
 }
 
 /**
+ * Why a played move went wrong: one plain sentence (HTML), or '' when no simple reason shows.
+ * `replyUci` is the opponent's best answer; `mateAgainst` and `hadMate` come from the engine scores.
+ */
+export function mistakeReason(fen, uci, { bestUci, replyUci, mateAgainst, hadMate } = {}) {
+  const play = (f, u) => { try { return new Chess(f).move(uciToMove(u)); } catch { return null; } };
+  const played = play(fen, uci);
+  const best = play(fen, bestUci);
+  const reply = played && play(played.after, replyUci);
+  if (mateAgainst) return `It allows a forced checkmate${reply ? `, starting with <b>${esc(reply.san)}</b>` : ''}.`;
+  if (hadMate && best) return `You had a forced checkmate starting with <b>${esc(best.san)}</b>!`;
+  if (reply && reply.captured && PIECE_VALUE[reply.captured] >= 3) return `Your ${NAMES[reply.captured]} on ${reply.to} can now be taken with <b>${esc(reply.san)}</b>.`;
+  if (best && best.captured && PIECE_VALUE[best.captured] >= 3) return `You could have captured the ${NAMES[best.captured]} on ${best.to}.`;
+  if (reply && reply.san.includes('+')) return `It allows <b>${esc(reply.san)}</b> with a strong check.`;
+  return '';
+}
+
+/**
  * explainMove(fen, uci, analysis) -> { san, reasons: string[] (HTML), line, eval }
  * `analysis` is the engine result for `fen` ({ score, lines: [{ pv }] }); scores are White's POV.
  */

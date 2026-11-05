@@ -112,6 +112,71 @@ async function run() {
   const sum = await waitFor(() => /accuracy/i.test(D().querySelector('#summary').textContent) && D().querySelector('#summary').textContent, 30000);
   log(!!sum, 'review summary: ' + (sum || '').replace(/\s+/g, ' ').slice(0, 120));
   log(/Blunder/.test(sum || ''), 'review flags blunders');
+  D().querySelector('#nextMistake').click();
+  await sleep(200);
+  const why = D().querySelector('#comment');
+  log(/forced checkmate/.test(why.textContent) && !!why.querySelector('.why li'), 'review explains the mistake: ' + why.textContent.replace(/\s+/g, ' ').slice(0, 120));
+
+  // ---------- learn from your mistakes ----------
+  const comment = () => D().querySelector('#comment').textContent;
+  const act = label => [...D().querySelectorAll('#retryActions button')].find(b => b.textContent.includes(label)).click();
+  D().querySelector('#retryBtn').click();
+  await sleep(200);
+  log(D().querySelector('#summary').hidden && /Find a better move/.test(comment()), 'retry mode starts: ' + comment().replace(/\s+/g, ' ').slice(0, 60));
+  for (let k = 0; k < 6 && !/You found/.test(comment()); k++) {
+    if (/You played g4/.test(comment())) {
+      await move('g2', 'g4');
+      log(/from the game/.test(comment()), 'repeating the game move is refused');
+      act('Try again');
+      await sleep(200);
+      act('Hint');
+      await sleep(200);
+      log(!!D().querySelector('.sq.hint'), 'retry hint highlights a piece');
+      const b = read('game').review.best[2];
+      await move(b.slice(0, 2), b.slice(2, 4));
+      log(/Found it/.test(comment()) && !!D().querySelector('#comment .why li'), 'best move is accepted and explained: ' + comment().replace(/\s+/g, ' ').slice(0, 80));
+      act('Next');
+    } else { act('Show answer'); await sleep(200); act('Next'); }
+    await sleep(200);
+  }
+  log(/You found/.test(comment()), 'retry ends with a score: ' + comment().replace(/\s+/g, ' ').slice(0, 60));
+  act('Back to review');
+  await sleep(300);
+  log(!D().querySelector('#summary').hidden && /Last time you found/.test(D().querySelector('#summary').textContent), 'review returns and remembers the score');
+
+  store('game', { botId: 'theo', playerColor: 'w', moves: ['e2e4', 'e7e5', 'd1h5', 'b8c6', 'h5f7', 'e8f7'], evals: {}, marks: {}, result: { winner: 'b', reason: 'resignation' }, recorded: true, hints: 0, takebacks: 0, started: 4 });
+  await go('#/play'); await go('#/review');
+  const rb = await waitFor(() => D().querySelector('#retryBtn'), 30000);
+  rb.click();
+  await sleep(200);
+  for (let k = 0; k < 6 && !/You played Qxf7/.test(comment()); k++) { act('Show answer'); await sleep(200); act('Next'); await sleep(200); }
+  await move('h5', 'e5');
+  await waitFor(() => /Not quite|Found it/.test(comment()), 15000);
+  log(/Not quite/.test(comment()) && /queen/.test(comment()), 'a different bad move is refused with a reason: ' + comment().replace(/\s+/g, ' ').slice(0, 80));
+  act('Try again');
+  await sleep(200);
+  log(/Find a better move/.test(comment()), 'try again restores the position');
+  act('Stop');
+  await sleep(300);
+  log(!D().querySelector('#summary').hidden, 'stop leaves retry mode');
+
+  // a sound move that is not the engine's first choice still counts
+  store('game', { botId: 'theo', playerColor: 'w', moves: ['e2e4', 'e7e5', 'g1f3', 'b8c6', 'f1c4', 'g8f6', 'c4f7', 'e8f7'], evals: {}, marks: {}, result: { winner: 'b', reason: 'resignation' }, recorded: true, hints: 0, takebacks: 0, started: 5 });
+  await go('#/play'); await go('#/review');
+  (await waitFor(() => D().querySelector('#retryBtn'), 30000)).click();
+  await sleep(200);
+  await move('c2', 'c3');
+  await waitFor(() => /Not quite|Found it/.test(comment()), 15000);
+  log(/Not quite/.test(comment()), 'leaving e4 hanging is refused: ' + comment().replace(/\s+/g, ' ').slice(0, 80));
+  act('Try again');
+  await sleep(200);
+  await move('d2', 'd3');
+  await waitFor(() => /Not quite|Found it/.test(comment()), 15000);
+  log(/works well too/.test(comment()), 'a good second-choice move is accepted: ' + comment().replace(/\s+/g, ' ').slice(0, 80));
+  act('Next');
+  await sleep(200);
+  act('Back to review');
+  await sleep(200);
 
   // ---------- lesson with task ----------
   await go('#/lesson/forks');

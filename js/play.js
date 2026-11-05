@@ -4,7 +4,7 @@ import { Board, destsFrom, checkSquare } from './board.js';
 import { engine } from './engine.js';
 import { BOTS, botById, botMove } from './bots.js';
 import { loadOpenings, lookupOpening, isBook } from './openings.js';
-import { explainMove as explainEngineMove } from './explain.js';
+import { explainMove as explainEngineMove, mistakeReason } from './explain.js';
 import {
   $, el, esc, store, sound, modal, confirmBox, toast, sleep, getSettings, setSetting,
   pieceImg, PIECE_VALUE, uciToMove, winPct, scoreToCp, fmtScore, classify, CLASS_LABEL,
@@ -400,12 +400,6 @@ export function renderGame(view) {
     let bestMove = null;
     try { bestMove = tmp.move(uciToMove(bestUci)); bestSan = bestMove.san; } catch { }
 
-    // What can the opponent do now?
-    const reply = after.bestmove;
-    const tmp2 = new Chess(chess.fen());
-    let replyMove = null;
-    try { replyMove = tmp2.move(uciToMove(reply)); } catch { }
-
     const cls = classify(drop, isBest);
     let label = CLASS_LABEL[cls], text;
     if (cls === 'best') { label = isBest ? 'Best' : 'Excellent'; text = isBest ? pick(['The top engine move!', 'Exactly what the engine wanted.', 'Spot on.']) : 'As good as the top move.'; }
@@ -416,19 +410,11 @@ export function renderGame(view) {
 
     // Reasons for bad moves
     if (cls === 'inaccuracy' || cls === 'mistake' || cls === 'blunder') {
-      const reasons = [];
-      if (after.score.mate != null && Math.sign(after.score.mate) === -sign) {
-        reasons.push(`It allows a forced checkmate${replyMove ? `, starting with <b>${esc(replyMove.san)}</b>` : ''}.`);
-      } else if (before.score.mate != null && Math.sign(before.score.mate) === sign) {
-        reasons.push(`You had a forced checkmate starting with <b>${esc(bestSan)}</b>!`);
-      } else if (replyMove && replyMove.captured && PIECE_VALUE[replyMove.captured] >= 3) {
-        reasons.push(`Your ${PIECE_NAMES[replyMove.captured]} on ${replyMove.to} can now be taken with <b>${esc(replyMove.san)}</b>.`);
-      } else if (bestMove && bestMove.captured && PIECE_VALUE[bestMove.captured] >= 3) {
-        reasons.push(`You could have captured the ${PIECE_NAMES[bestMove.captured]} on ${bestMove.to}.`);
-      } else if (replyMove && replyMove.san.includes('+')) {
-        reasons.push(`It allows <b>${esc(replyMove.san)}</b> with a strong check.`);
-      }
-      text += ' ' + reasons.join(' ');
+      text += ' ' + mistakeReason(fenBefore, move.lan, {
+        bestUci, replyUci: after.bestmove,
+        mateAgainst: after.score.mate != null && Math.sign(after.score.mate) === -sign,
+        hadMate: before.score.mate != null && Math.sign(before.score.mate) === sign,
+      });
       text += ` <a href="javascript:void 0" data-act="takeback">Take back</a>`;
       if (bestMove) board.setArrows([{ from: bestMove.from, to: bestMove.to, color: 'green' }]);
     }
