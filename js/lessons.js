@@ -48,7 +48,7 @@ export const LESSONS = [
   {
     id: 'special', section: 'basics', title: 'Special moves', sub: 'Castling, en passant and promotion',
     steps: [
-      { text: `<h3>Castling</h3><p>Castling moves your king two squares toward a rook, and the rook jumps over to the other side. It keeps your king safe and brings your rook into play.</p><p>You can only castle if: neither piece has moved, the squares between them are empty, and your king is not in check and does not pass through an attacked square.</p><p><b>Castle kingside</b>: move your king two squares to the right.</p>`,
+      { text: `<h3>Castling</h3><p>Castling moves your king two squares toward a rook, and the rook jumps over to the other side. It keeps your king safe and brings your rook into play.</p><p>You can only castle if: neither piece has moved, the squares between them are empty, and your king is not in check and does not pass through or land on an attacked square.</p><p><b>Castle kingside</b>: move your king two squares to the right.</p>`,
         line: 'e4 e5 Nf3 Nc6 Bc4 Bc5', task: { solution: ['e1g1'], teach: true }, success: 'Your king is now safely tucked away on g1.' },
       { text: `<h3>En passant</h3><p>If an enemy pawn moves two squares and lands right <b>next to</b> your pawn, you may capture it as if it had moved only one square. You must do it immediately, or the chance is gone.</p><p>Black just played f7–f5. Capture it <b>en passant</b> with your e5-pawn.</p>`,
         line: 'e4 a6 e5 f5', arrows: [['f7', 'f5', 'yellow']], task: { solution: ['e5f6'], teach: true }, success: 'Your pawn lands on f6 and the black pawn disappears.' },
@@ -60,7 +60,7 @@ export const LESSONS = [
     id: 'checkmate', section: 'basics', title: 'Check, checkmate & stalemate', sub: 'How a game is won (or drawn)',
     steps: [
       { text: `<h3>Check</h3><p>When a king is attacked, it is in <b>check</b>. You must get out of check immediately, in one of three ways:</p><ul><li><b>Move</b> the king</li><li><b>Block</b> the attack</li><li><b>Capture</b> the attacker</li></ul><p>Your king is in check from the rook. Get out of check!</p>`,
-        fen: '4r1k1/8/8/8/8/8/3N1PPP/4K3 w - - 0 1', task: { anyMove: true }, success: 'Good. Here blocking with Ne4 is fine, and so is moving the king.' },
+        fen: '4r1k1/8/8/8/8/8/3N1PPP/4K3 w - - 0 1', task: { anyMove: true }, success: 'You are out of check. Kf1 or Kd1 is best here: blocking with Ne4 is legal, but the rook simply takes the undefended knight.' },
       { text: `<h3>Checkmate</h3><p>If the king is in check and <b>none</b> of the three escapes works, it is <b>checkmate</b> and the game is over.</p><p>The black king is trapped behind its own pawns. Deliver checkmate in one move.</p>`,
         fen: '6k1/5ppp/8/8/8/8/5PPP/3R2K1 w - - 0 1', task: { solution: ['d1d8'], mate: true }, success: 'Checkmate! This is called a back-rank mate.' },
       { text: `<h3>Another checkmate</h3><p>Use your king to support the queen. Find the checkmate.</p>`,
@@ -77,12 +77,12 @@ export const LESSONS = [
       { text: `<h3>1. Fight for the center</h3><p>The four central squares (d4, e4, d5, e5) are the most important. Pieces in the center control more squares. Start with a central pawn move like <b>e4</b> or <b>d4</b>.</p>`,
         fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', arrows: [['e2', 'e4', 'green'], ['d2', 'd4', 'green']], marks: { d4: 'mark', e4: 'mark', d5: 'mark', e5: 'mark' } },
       { text: `<h3>2. Develop your pieces</h3><p>Bring your knights and bishops off the back rank quickly, toward the center. A piece that hasn't moved is not helping.</p><p>Develop your knight to its best square.</p>`,
-        line: 'e4 e5', task: { solution: ['g1f3'], accept: ['g1f3', 'b1c3'] }, success: 'Nf3 develops a piece and attacks the e5-pawn at the same time.' },
+        line: 'e4 e5', task: { solution: ['g1f3'], accept: ['g1f3', 'b1c3'], successBy: { b1c3: 'Nc3 develops a piece toward the center and protects the e4-pawn.' } }, success: 'Nf3 develops a piece and attacks the e5-pawn at the same time.' },
       { text: `<h3>Knights before bishops</h3><p>A good rule of thumb: develop knights first (their best squares are obvious: f3/c3 or f6/c6), then bishops.</p><p>Now develop your bishop to an active square.</p>`,
-        line: 'e4 e5 Nf3 Nc6', task: { solution: ['f1c4'], accept: ['f1c4', 'f1b5'], teach: true }, success: 'The bishop now aims at f7, the weakest point in Black\'s camp.' },
-      { text: `<h3>3. Castle early</h3><p>Get your king to safety, usually within the first 10 moves. Castling also connects your rooks.</p>`,
+        line: 'e4 e5 Nf3 Nc6', task: { solution: ['f1c4'], accept: ['f1c4', 'f1b5'], teach: true, successBy: { f1b5: 'The bishop now attacks the c6-knight, the piece defending e5.' } }, success: 'The bishop now aims at f7, the weakest point in Black\'s camp.' },
+      { text: `<h3>3. Castle early</h3><p>Get your king to safety, usually within the first 10 moves. Castling also helps connect your rooks, once the pieces between them have moved.</p>`,
         line: 'e4 e5 Nf3 Nc6 Bc4 Bc5', task: { solution: ['e1g1'], teach: true }, success: 'Your king is safe and your rook can join the game.' },
-      { text: `<h3>4. Don't bring the queen out too early</h3><p>An early queen gets chased around by enemy pieces, and every time she has to move, your opponent develops with tempo.</p><p>Here White played Qh5 and Qf3, while Black developed knights with gain of time.</p>`,
+      { text: `<h3>4. Don't bring the queen out too early</h3><p>An early queen gets chased around by enemy pieces, and every time she has to move, your opponent develops with tempo.</p><p>Here White moved the queen twice. Black kicked her with g6 and developed both knights.</p>`,
         line: 'e4 e5 Qh5 Nc6 Bc4 g6 Qf3 Nf6' },
       { text: `<h3>Summary</h3><ul><li>Control the center with pawns and pieces</li><li>Develop knights and bishops quickly</li><li>Castle early</li><li>Don't move the same piece twice without a reason</li><li>Don't bring the queen out too early</li><li>Connect your rooks</li></ul><p>Follow these and you'll get a good position against almost any opponent.</p>` },
     ],
@@ -92,10 +92,10 @@ export const LESSONS = [
     steps: [
       { text: `<h3>The threat</h3><p>White's queen and bishop are both aiming at <b>f7</b>. If Black ignores it, <b>Qxf7#</b> is checkmate. This trap catches many beginners.</p><p>You are Black. Stop the threat, ideally while also attacking the queen.</p>`,
         line: 'e4 e5 Qh5 Nc6 Bc4', arrows: [['h5', 'f7', 'red'], ['c4', 'f7', 'red']],
-        task: { solution: ['g7g6'], accept: ['g7g6', 'd8e7'], teach: true }, success: 'Well defended! g6 blocks the attack and kicks the queen away. (Qe7 also defends f7.)' },
+        task: { solution: ['g7g6'], accept: ['g7g6', 'd8e7', 'd8f6'], teach: true, successBy: { d8e7: 'Well defended! Qe7 protects f7. (g6 also works, and kicks the queen away.)', d8f6: 'Well defended! Qf6 protects f7, though it takes the best square from your knight.' } }, success: 'Well defended! g6 blocks the attack and kicks the queen away. (Qe7 also defends f7.)' },
       { text: `<h3>It's not over</h3><p>White tries again: Qf3 renews the attack on f7. Defend once more, and develop a piece at the same time.</p>`,
         line: 'e4 e5 Qh5 Nc6 Bc4 g6 Qf3', arrows: [['f3', 'f7', 'red']],
-        task: { solution: ['g8f6'] }, success: 'Nf6 blocks the queen and develops a piece. Black is now doing great because White wasted time with the queen.' },
+        task: { solution: ['g8f6'] }, success: 'Nf6 blocks the queen and develops a piece. Black is already slightly better, because White wasted time with the queen.' },
     ],
   },
 
@@ -107,7 +107,7 @@ export const LESSONS = [
       { text: `<h3>Royal fork</h3><p>Find the knight move that attacks the king <b>and</b> the rook.</p>`,
         fen: 'r3k3/pp3ppp/8/3N4/8/8/PP3PPP/4K3 w - - 0 1', task: { solution: ['d5c7', 'e8d7', 'c7a8'] }, success: 'The king must move, and you win the rook. A fork with check is especially strong.' },
       { text: `<h3>Pawn fork</h3><p>Even humble pawns can fork. Push a pawn to attack both black pieces.</p>`,
-        fen: '4k3/8/8/2n1b3/8/3PP3/8/4K3 w - - 0 1', task: { solution: ['d3d4'] }, success: 'The pawn attacks the knight and the bishop. One of them will fall.' },
+        fen: '4k3/8/8/2n1b3/8/3PP3/4K3/8 w - - 0 1', task: { solution: ['d3d4'] }, success: 'The pawn attacks the knight and the bishop. One of them will fall.' },
       { text: `<h3>Queen fork</h3><p>The queen can fork in eight directions. Find a check that also attacks the rook. Careful: the rook must not be able to capture your queen!</p>`,
         fen: '4k3/8/r7/8/8/8/8/3QK3 w - - 0 1', task: { solution: ['d1e2'] }, success: 'Qe2+ checks along the e-file and attacks the a6-rook along the diagonal. Next move you win it.' },
     ],
@@ -226,7 +226,7 @@ export const LESSONS = [
     id: 'blundercheck', section: 'thinking', title: 'The blunder check', sub: 'Five seconds that save games',
     steps: [
       { text: `<h3>Before you touch a piece</h3><p>When you've found a move you like, stop and do a quick <b>blunder check</b>:</p><ul><li>After my move, is anything of mine <b>undefended</b>?</li><li>Does my move allow a <b>check</b>, <b>fork</b> or <b>pin</b>?</li><li>What is my opponent's <b>best reply</b>?</li></ul><p>If you find a problem, look for another move.</p>` },
-      { text: `<h3>Have a plan</h3><p>When there are no tactics, improve your <b>worst piece</b>. Find the piece doing the least and give it a better square. Good plans are often that simple.</p><p>Practise these habits in your games against the bots with the coach turned on. It will point out exactly where your blunder check failed.</p>` },
+      { text: `<h3>Have a plan</h3><p>When there are no tactics, improve your <b>worst piece</b>. Find the piece doing the least and give it a better square. Good plans are often that simple.</p><p>Practise these habits in your games against the bots with the coach turned on. It will point out moves where your blunder check failed.</p>` },
     ],
   },
 ];

@@ -8,6 +8,7 @@ import { LESSONS } from '../js/lessons.js';
 import { COURSES } from '../js/courses.js';
 import { engine } from '../js/engine.js';
 import { BOTS, botMove } from '../js/bots.js';
+import { explainMove, mistakeReason } from '../js/explain.js';
 import { scoreToCp, uciToMove } from '../js/util.js';
 
 const lines = [];
@@ -126,6 +127,18 @@ async function run() {
   const pc = new Chess('8/4P1k1/8/8/8/8/8/4K3 w - - 0 1');
   const pr = await engine.analyse(pc.fen(), { depth: 8 });
   log(pr.bestmove === 'e7e8q', 'engine promotion uci ' + pr.bestmove);
+
+  // ---------- coach explanations ----------
+  const plain = r => r.reasons.join(' ').replace(/<[^>]+>/g, '');
+  const defended = '4k3/pp3ppp/2n1p3/3p4/2P5/8/PP3PPP/4K3 w - - 0 1';
+  log(!/takes back/.test(plain(explainMove(defended, 'c4d5'))), 'behind in material is not a recapture');
+  log(/takes back on d5/.test(plain(explainMove(defended, 'c4d5', {}, { captured: 'p', to: 'd5' }))), 'a real recapture says takes back');
+  const exchange = { score: { cp: 200 }, lines: [{ pv: ['e2h5', 'f7f6', 'h5e8', 'd6e8'] }] };
+  log(/material \(\+2\)/.test(plain(explainMove('4r3/5k2/3n4/8/8/8/4B3/3K4 w - - 0 1', 'e2h5', exchange))), 'rook for a knight is not two pawns');
+  log(/pawn on f5/.test(plain(explainMove('4k3/8/8/4Pp2/8/8/8/4K3 w - f6 0 1', 'e5f6'))), 'en passant names the captured pawn\'s square');
+  const ruy = 'r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3';
+  log(mistakeReason(ruy, 'a7a6', { replyUci: 'b5c6' }) === '', 'a fair trade is not called a loss');
+  log(/queen on e5 can be taken/.test(mistakeReason('r1b1kbnr/pppp1ppp/2n5/4p2Q/4P3/8/PPPP1PPP/RNB1KBNR w KQkq - 2 3', 'h5e5', { replyUci: 'c6e5' })), 'a hanging piece is called out');
 
   lines.unshift(fails ? `RESULT: ${fails} FAILURES` : 'RESULT: ALL PASSED');
   flush();

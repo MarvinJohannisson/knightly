@@ -191,7 +191,7 @@ async function run() {
   // wrong move feedback in next step
   D().querySelector('#nextBtn').click();
   await sleep(400);
-  await move('e1', 'e2');
+  await move('e2', 'd2');
   const fb2 = D().querySelector('#fb');
   log(fb2 && fb2.classList.contains('fail'), 'wrong move gives feedback: ' + (fb2 && fb2.textContent.slice(0, 40)));
 

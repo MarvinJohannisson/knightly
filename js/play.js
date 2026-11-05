@@ -506,7 +506,7 @@ export function renderGame(view) {
     } else {
       board.setArrows([{ from: m.from, to: m.to, color: 'blue' }]);
       let ex = null;
-      try { ex = explainEngineMove(chess.fen(), st.hintUci, st.hintAnalysis); } catch (e) { console.error('explain failed', e); }
+      try { ex = explainEngineMove(chess.fen(), st.hintUci, st.hintAnalysis, chess.history({ verbose: true }).at(-1)); } catch (e) { console.error('explain failed', e); }
       if (!ex) { setCoach('💡 The engine suggests the arrow move.'); return; }
       setCoach(`💡 The engine suggests <b>${esc(ex.san)}</b>.
         <ul class="why">${ex.reasons.map(r => `<li>${r}</li>`).join('')}</ul>
@@ -522,7 +522,7 @@ export function renderGame(view) {
   $('#reviewBtn', view).addEventListener('click', () => { location.hash = '#/review'; });
   $('#resignBtn', view).addEventListener('click', async () => {
     if (data.result) { location.hash = '#/play'; return; }
-    const ok = await confirmBox('Resign?', '<p class="muted">The game will count as a loss.</p>', 'Resign');
+    const ok = await confirmBox('Resign?', `<p class="muted">${isWhatIf() ? 'You chose moves for the bot, so this game does not count in your stats.' : 'The game will count as a loss.'}</p>`, 'Resign');
     if (ok && !data.result) {
       engine.stop(); st.gen++; st.thinking = false;
       finish({ winner: data.playerColor === 'w' ? 'b' : 'w', reason: 'resignation' });

@@ -181,9 +181,9 @@ export function renderReview(view, param) {
   }
 
   /** Reasons a move is strong, as a list for the coach box. */
-  function whyHtml(fen, uci, analysis) {
+  function whyHtml(i, uci, analysis = analysisAt(i)) {
     let ex = null;
-    try { ex = explainMove(fen, uci, analysis); } catch (e) { console.error('explain failed', e); }
+    try { ex = explainMove(fens[i], uci, analysis, verbose[i - 1]); } catch (e) { console.error('explain failed', e); }
     if (!ex) return '';
     return `<ul class="why">${ex.reasons.map(r => `<li>${r}</li>`).join('')}</ul>${ex.line ? `<div class="small muted">Likely next: ${ex.line}</div>` : ''}`;
   }
@@ -209,7 +209,7 @@ export function renderReview(view, param) {
       if (bad) comment += ` Better was <b>${esc(bestSan)}</b> (green arrow).`;
       else if (mm.cls === 'good' && bestSan) comment += ` <span class="muted">Engine preferred ${esc(bestSan)}.</span>`;
       comment += ` <span class="muted small">Eval: ${fmtCp(mm.cpAfter)}</span>`;
-      if (bad && mine) comment += whyHtml(fens[cur - 1], mm.bestUci, analysisAt(cur - 1));
+      if (bad && mine) comment += whyHtml(cur - 1, mm.bestUci);
       board.setMarks({ [mm.to]: mm.cls === 'blunder' || mm.cls === 'mistake' ? 'wrong' : mm.cls === 'best' ? 'good' : undefined });
     } else board.setMarks({});
     board.setArrows(arrows);
@@ -357,7 +357,7 @@ export function renderReview(view, param) {
     let topSan = '';
     try { topSan = new Chess(fens[m.idx]).move(uciToMove(m.bestUci)).san; } catch { }
     $('#comment', view).innerHTML = `<span class="tag best">Found it</span> <b>${esc(mv.san)}</b> ${isBest ? 'is the best move here.' : `works well too. The engine's top choice was <b>${esc(topSan)}</b>.`}
-      ${whyHtml(fens[m.idx], mv.lan, analysis)}`;
+      ${whyHtml(m.idx, mv.lan, analysis)}`;
     setRetryActions([{ label: 'Next', cls: 'primary', fn: nextRetry }]);
   }
 
@@ -386,7 +386,7 @@ export function renderReview(view, param) {
     board.setMovable(null);
     board.setArrows([{ from: best.from, to: best.to, color: 'green' }]);
     $('#comment', view).innerHTML = `The best move was <b>${esc(best.san)}</b>. ${reasonFor(m, m.lan, m.cpAfter, data.review.best[m.idx + 1])}
-      ${whyHtml(fens[m.idx], m.bestUci, analysisAt(m.idx))}`;
+      ${whyHtml(m.idx, m.bestUci)}`;
     setRetryActions([{ label: 'Next', cls: 'primary', fn: nextRetry }]);
   }
 

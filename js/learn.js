@@ -147,7 +147,7 @@ export function renderLesson(view, id) {
     board.setPosition(chess.fen(), { lastMove: [from, to], check: checkSquare(chess) });
     board.setMarks({ [to]: 'good' });
     st.pos++;
-    if (t.anyMove || !t.solution || st.pos >= t.solution.length || chess.isGameOver()) return complete();
+    if (t.anyMove || !t.solution || st.pos >= t.solution.length || chess.isGameOver()) return complete(t.successBy?.[uci]);
     board.setMovable(null);
     feedback('ok', 'Good! Keep going…');
     await sleep(550);

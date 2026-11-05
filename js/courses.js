@@ -3,7 +3,7 @@
 
 export const COURSES = [
   {
-    id: 'italian', name: 'Italian Game', side: 'w', eco: 'C50', level: 'Beginner',
+    id: 'italian', name: 'Italian Game', side: 'w', eco: 'C54', level: 'Beginner',
     summary: 'A classical opening: quick development, castle early and aim at f7.',
     ideas: ['Develop knights and bishops fast', 'The c4-bishop aims at the weak f7-square', 'Prepare d4 with c3 to take the center', 'Castle early and bring the rook to e1'],
     moves: ['e4', 'e5', 'Nf3', 'Nc6', 'Bc4', 'Bc5', 'c3', 'Nf6', 'd3', 'd6', 'O-O', 'O-O', 'Re1', 'a6', 'Bb3', 'Ba7', 'h3'],
@@ -20,14 +20,14 @@ export const COURSES = [
     },
   },
   {
-    id: 'ruy', name: 'Ruy Lopez', side: 'w', eco: 'C84', level: 'Intermediate',
+    id: 'ruy', name: 'Ruy Lopez', side: 'w', eco: 'C92', level: 'Intermediate',
     summary: 'One of the oldest and most respected openings. White puts long-term pressure on e5.',
     ideas: ['Pressure on the e5-pawn by attacking its defender (Nc6)', 'Build a big center with c3 and d4', 'The bishop retreats to b3 and c2 to stay active', 'Slow, strategic play'],
     moves: ['e4', 'e5', 'Nf3', 'Nc6', 'Bb5', 'a6', 'Ba4', 'Nf6', 'O-O', 'Be7', 'Re1', 'b5', 'Bb3', 'd6', 'c3', 'O-O', 'h3'],
     notes: {
       4: 'The Ruy Lopez (or Spanish). The bishop attacks the knight that defends e5.',
       5: 'The Morphy Defence: asking the bishop what it wants.',
-      6: 'Keeping the pin. (Bxc6 is the Exchange Variation.)',
+      6: 'Keeping the pressure on the knight. (Bxc6 is the Exchange Variation.)',
       8: 'Castling. e4 is "attacked" but Nxe4 would let White win it back with Re1 or Qe2.',
       10: 'Defends e4 and gets ready for c3 and d4.',
       12: 'The bishop now looks at f7 from b3.',
@@ -48,11 +48,11 @@ export const COURSES = [
       8: 'Opening the light-squared bishop.',
       10: 'Natural development. Next White plays Bd3 or Rc1 and castles.',
       11: 'Asking the bishop: take or retreat?',
-      12: 'Keeping the pin.',
+      12: 'Staying on the diagonal, with pressure on the f6-knight.',
     },
   },
   {
-    id: 'london', name: 'London System', side: 'w', eco: 'D02', level: 'Beginner',
+    id: 'london', name: 'London System', side: 'w', eco: 'D00', level: 'Beginner',
     summary: 'A system you can play against almost anything. Same setup every game: d4, Bf4, e3, Nf3, c3, Bd3.',
     ideas: ['Develop the dark bishop to f4 BEFORE playing e3', 'Solid pawn triangle c3-d4-e3', 'Easy plans: Ne5, and sometimes a kingside attack', 'Very little theory to memorize'],
     moves: ['d4', 'd5', 'Bf4', 'Nf6', 'e3', 'e6', 'Nf3', 'c5', 'c3', 'Nc6', 'Nbd2', 'Bd6', 'Bg3', 'O-O', 'Bd3'],
@@ -61,7 +61,7 @@ export const COURSES = [
       4: 'Now the light bishop can develop too.',
       7: 'Black challenges the center.',
       8: 'Supporting d4 with a solid pawn chain.',
-      10: 'The knight goes to d2 so the c-pawn can support d4 and the knight can jump to e5 later.',
+      10: 'The knight develops to d2 because the pawn took c3. It supports e4 and can replace the f3-knight after Ne5.',
       12: 'Keep the bishop: if ...Bxg3, hxg3 opens the h-file for the rook.',
       14: 'Aiming at the black king. White will castle and maybe play Ne5 or Qe2.',
     },
@@ -109,7 +109,7 @@ export const COURSES = [
     },
   },
   {
-    id: 'caro', name: 'Caro-Kann Defence', side: 'b', eco: 'B18', level: 'Beginner',
+    id: 'caro', name: 'Caro-Kann Defence', side: 'b', eco: 'B19', level: 'Beginner',
     summary: 'Rock-solid defence against 1.e4. Black develops the light bishop before ...e6.',
     ideas: ['c6 prepares ...d5 without blocking the c8-bishop', 'Develop the bishop to f5 or g4 early', 'Solid pawn structure and a safe king'],
     moves: ['e4', 'c6', 'd4', 'd5', 'Nc3', 'dxe4', 'Nxe4', 'Bf5', 'Ng3', 'Bg6', 'h4', 'h6', 'Nf3', 'Nd7', 'h5', 'Bh7', 'Bd3', 'Bxd3', 'Qxd3'],
@@ -131,15 +131,15 @@ export const COURSES = [
     moves: ['e4', 'd5', 'exd5', 'Qxd5', 'Nc3', 'Qa5', 'd4', 'Nf6', 'Nf3', 'c6', 'Bc4', 'Bf5'],
     notes: {
       1: 'The Scandinavian: confronting e4 right away.',
-      3: 'Recapturing. The queen comes out early, but White has no easy way to exploit it.',
+      3: 'Recapturing. The queen comes out early and Nc3 will gain a tempo on her, but she has safe squares to go to.',
       5: 'A safe square for the queen. From a5 she eyes the c3-knight and the diagonal toward the white king.',
       7: 'Developing.',
       9: 'Gives the queen a retreat square and controls d5 and b5.',
-      11: 'The bishop gets out before ...e6. A comfortable, solid position for Black.',
+      11: 'The bishop gets out before ...e6. A solid position for Black, though White keeps a small edge.',
     },
   },
   {
-    id: 'slav', name: 'Slav Defence', side: 'b', eco: 'D17', level: 'Intermediate',
+    id: 'slav', name: 'Slav Defence', side: 'b', eco: 'D19', level: 'Intermediate',
     summary: 'A solid answer to 1.d4 and the Queen\'s Gambit. Black supports d5 with the c-pawn.',
     ideas: ['c6 defends d5 while keeping the c8-bishop free', 'The bishop develops to f5 before ...e6', 'Solid center, harmonious development'],
     moves: ['d4', 'd5', 'c4', 'c6', 'Nf3', 'Nf6', 'Nc3', 'dxc4', 'a4', 'Bf5', 'e3', 'e6', 'Bxc4', 'Bb4', 'O-O', 'O-O'],
@@ -152,7 +152,7 @@ export const COURSES = [
     },
   },
   {
-    id: 'kid', name: "King's Indian Defence", side: 'b', eco: 'E92', level: 'Advanced',
+    id: 'kid', name: "King's Indian Defence", side: 'b', eco: 'E97', level: 'Advanced',
     summary: 'Black lets White build a big center, then attacks it. Leads to exciting attacking games.',
     ideas: ['Fianchetto the bishop on g7 and castle quickly', 'Strike back in the center with ...e5', 'After d5, attack on the kingside with ...Ne8 and ...f5'],
     moves: ['d4', 'Nf6', 'c4', 'g6', 'Nc3', 'Bg7', 'e4', 'd6', 'Nf3', 'O-O', 'Be2', 'e5', 'O-O', 'Nc6', 'd5', 'Ne7'],

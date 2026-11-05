@@ -198,7 +198,7 @@ export function renderPuzzle(view, theme) {
     if (!st.hintShown) {
       board.setMarks({ [m.from]: 'hint' });
       st.hintShown = true;
-      setStatus('turn', `<b>Hint:</b> move the highlighted piece.<div class="small muted">Hints count as a miss for your rating.</div>`);
+      setStatus('turn', `<b>Hint:</b> move the highlighted piece.<div class="small muted">${rated ? 'A hint costs half as many rating points as a miss, and ends your streak.' : 'A hint ends your streak.'}</div>`);
     } else {
       board.setArrows([{ from: m.from, to: m.to, color: 'blue' }]);
     }

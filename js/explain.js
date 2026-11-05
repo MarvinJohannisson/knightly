@@ -60,26 +60,32 @@ export function movesInWords(fen, pv, max = 4) {
   return out.join(', ');
 }
 
+/** Pawns the given side has more than the other. */
+function pawnBalance(chess, color) {
+  return pieces(chess, color).filter(p => p.type === 'p').length - pieces(chess, other(color)).filter(p => p.type === 'p').length;
+}
+
 /** Material the mover gains over the engine line (measured after the opponent's replies). */
 function lineGain(fen, pv, me) {
   const c = new Chess(fen);
-  const base = material(c, me);
-  let gain = 0, plies = 0;
+  const base = material(c, me), basePawns = pawnBalance(c, me);
+  let gain = 0, plies = 0, pawns = 0;
   for (let i = 0; i < Math.min(pv.length, 6); i++) {
     try { c.move(uciToMove(pv[i])); } catch { break; }
     if (i % 2 === 1) {
       const g = material(c, me) - base;
       if (g !== gain) plies = i + 1; // shortest line that shows the final gain
       gain = g;
+      pawns = pawnBalance(c, me) - basePawns;
     }
   }
-  return { gain, plies };
+  return { gain, plies, pawns };
 }
 
-function gainText(g) {
-  if (g === 1) return 'a pawn';
-  if (g === 2) return 'two pawns';
-  if (g === 3) return 'a piece';
+function gainText(g, pawns) {
+  if (g === 1 && pawns === 1) return 'a pawn';
+  if (g === 2 && pawns === 2) return 'two pawns';
+  if (g === 3 && pawns === 0) return 'a piece';
   return `material (+${g})`;
 }
 
@@ -94,7 +100,9 @@ export function mistakeReason(fen, uci, { bestUci, replyUci, mateAgainst, hadMat
   const reply = played && play(played.after, replyUci);
   if (mateAgainst) return `It allows a forced checkmate${reply ? `, starting with <b>${esc(reply.san)}</b>` : ''}.`;
   if (hadMate && best) return `You had a forced checkmate starting with <b>${esc(best.san)}</b>!`;
-  if (reply && reply.captured && PIECE_VALUE[reply.captured] >= 3) return `Your ${NAMES[reply.captured]} on ${reply.to} can now be taken with <b>${esc(reply.san)}</b>.`;
+  // A capture you can answer by retaking something at least as valuable is a trade, not a loss.
+  const trade = reply && new Chess(reply.after).attackers(reply.to, played.color).length > 0 && val(reply.piece) >= PIECE_VALUE[reply.captured];
+  if (reply && reply.captured && PIECE_VALUE[reply.captured] >= 3 && !trade) return `Your ${NAMES[reply.captured]} on ${reply.to} can be taken with <b>${esc(reply.san)}</b>.`;
   if (best && best.captured && PIECE_VALUE[best.captured] >= 3) return `You could have captured the ${NAMES[best.captured]} on ${best.to}.`;
   if (reply && reply.san.includes('+')) return `It allows <b>${esc(reply.san)}</b> with a strong check.`;
   return '';
@@ -103,14 +111,14 @@ export function mistakeReason(fen, uci, { bestUci, replyUci, mateAgainst, hadMat
 /**
  * explainMove(fen, uci, analysis) -> { san, reasons: string[] (HTML), line, eval }
  * `analysis` is the engine result for `fen` ({ score, lines: [{ pv }] }); scores are White's POV.
+ * `prev` is the verbose move that led to `fen`, used to spot recaptures.
  */
-export function explainMove(fen, uci, analysis = {}) {
+export function explainMove(fen, uci, analysis = {}, prev = null) {
   const c = new Chess(fen);
   const me = c.turn(), opp = other(me);
   const sign = me === 'w' ? 1 : -1;
   const fullmove = +fen.split(' ')[5] || 1;
   const wasCheck = c.inCheck();
-  const matBefore = material(c, me);
 
   const dangerBefore = pieces(c, me).map(p => p.square).filter(sq => inDanger(c, sq));
   const threatBefore = mateThreat(c);
@@ -134,10 +142,11 @@ export function explainMove(fen, uci, analysis = {}) {
   if (m.captured) {
     const cv = PIECE_VALUE[m.captured], mv = PIECE_VALUE[m.piece];
     const defended = c.attackers(m.to, opp).length > 0;
-    if (!defended) { add(`It wins the ${NAMES[m.captured]} on ${m.to} <b>for free</b>: nothing can take back.`); explainedGain = cv; }
+    const sq = m.flags.includes('e') ? m.to[0] + m.from[1] : m.to; // en passant takes the pawn beside the mover
+    if (!defended) { add(`It wins the ${NAMES[m.captured]} on ${sq} <b>for free</b>: nothing can take back.`); explainedGain = cv; }
     else if (cv > mv) { add(`It wins material: your ${NAMES[m.piece]} takes a more valuable ${NAMES[m.captured]}.`); explainedGain = cv - mv; }
-    else if (matBefore < 0) add(`It <b>takes back</b> the ${NAMES[m.captured]}, winning back the material.`);
-    else if (cv === mv) add(`It trades off the ${NAMES[m.captured]} on ${m.to}.`);
+    else if (prev?.captured && prev.to === m.to) add(`It <b>takes back</b> on ${m.to}, winning back the material.`);
+    else if (cv === mv) add(`It trades off the ${NAMES[m.captured]} on ${sq}.`);
   }
 
   // --- Escaping check ---
@@ -177,11 +186,11 @@ export function explainMove(fen, uci, analysis = {}) {
   if (saved.length) add(`It protects your ${NAMES[c.get(saved[0]).type]} on ${saved[0]}, which was under attack.`);
 
   // --- Follow-up in the engine line ---
-  const { gain, plies } = lineGain(fen, pv, me);
+  const { gain, plies, pawns } = lineGain(fen, pv, me);
   const hasTactic = reasons.some(r => r.includes('fork') || r.includes('checkmate'));
   const showsLine = !hasTactic && gain > explainedGain && gain >= 1 && pv.length >= 2;
   if (showsLine) {
-    add(`It sets up a tactic: ${movesInWords(fen, pv, plies)}, and you've won ${gainText(gain)}.`);
+    add(`It sets up a tactic: ${movesInWords(fen, pv, plies)}, and you've won ${gainText(gain, pawns)}.`);
   }
 
   // --- Positional ideas ---
