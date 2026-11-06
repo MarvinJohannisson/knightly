@@ -61,6 +61,28 @@ async function run() {
   D().querySelector('#hintBtn').click();
   await waitFor(() => D().querySelector('.sq.hint'), 15000);
   log(!!D().querySelector('.sq.hint'), 'hint highlights a piece');
+  // what if: moves for both sides stay off the game
+  const coachText = () => D().querySelector('#coachMsg').textContent;
+  const wiGame = JSON.stringify(read('game').moves);
+  const wiHints = read('game').hints;
+  D().querySelector('#whatIfBtn').click();
+  await sleep(2500);
+  log(!!D().querySelector('#whatIfBtn.on') && /What if/.test(coachText()), 'what if opens');
+  log(read('game').hints === wiHints, 'what if after a hint adds no extra hint');
+  await move('a2', 'a3');
+  log(!!await waitFor(() => /Their best reply/.test(coachText()), 15000), 'what if answers your move: ' + coachText().slice(0, 90));
+  log(JSON.stringify(read('game').moves) === wiGame, 'what if leaves the saved game alone');
+  log(/What if:\s*a3/.test(D().querySelector('#moves').textContent), 'what if shows its own line');
+  D().querySelector('[data-act="compare"]').click();
+  log(!!await waitFor(() => D().querySelector('#coachMsg .compare li'), 15000), 'compare shows the top moves: ' + coachText().slice(0, 90));
+  D().querySelector('#undoBtn').click();
+  await sleep(300);
+  log(!/a3/.test(D().querySelector('#moves').textContent), 'undo steps back on the what if board');
+  log(read('game').takebacks === 0, 'stepping back is not a takeback');
+  D().querySelector('#whatIfBtn').click();
+  await sleep(300);
+  log(!D().querySelector('#whatIfBtn.on') && !!D().querySelector('.sq.hint'), 'back to game restores the hint');
+  log(/1\.\s*e4/.test(D().querySelector('#moves').textContent), 'back to game restores the move list');
   // takeback
   const before = read('game').moves.length;
   D().querySelector('#undoBtn').click();

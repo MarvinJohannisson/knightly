@@ -4,7 +4,7 @@ import { Board, destsFrom, checkSquare } from './board.js';
 import { engine } from './engine.js';
 import { BOTS, botById, botMove } from './bots.js';
 import { loadOpenings, lookupOpening, isBook } from './openings.js';
-import { explainMove as explainEngineMove, mistakeReason } from './explain.js';
+import { explainMove as explainEngineMove, mistakeReason, whatIfMove, compareMoves } from './explain.js';
 import {
   $, el, esc, store, sound, modal, confirmBox, toast, sleep, getSettings, setSetting,
   pieceImg, PIECE_VALUE, uciToMove, winPct, scoreToCp, fmtScore, classify, CLASS_LABEL,
@@ -110,7 +110,10 @@ export function renderGame(view) {
   const st = {
     gen: 0, thinking: false, picking: false, turnAnalysis: null, hintStep: 0, hintMove: null,
     coachHtml: '', coachTag: '', destroyed: false,
+    sandbox: null, // the "What if?" board: a scratch position that never touches the game
+    asking: false, whatIfUsed: false,
   };
+  const pos = () => (st.sandbox ? st.sandbox.chess : chess);
 
   view.innerHTML = `
     <div class="player-bar" id="oppBar"></div>
@@ -120,10 +123,11 @@ export function renderGame(view) {
     <div class="moves" id="moves"></div>
     <div class="controls">
       <button class="ctl" id="hintBtn"><svg viewBox="0 0 24 24"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.4 1 1.1 1 1.8V16h5v-.3c0-.7.4-1.4 1-1.8A6 6 0 0 0 12 3z"/></svg>Hint</button>
-      <button class="ctl" id="undoBtn"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg>Takeback</button>
+      <button class="ctl" id="undoBtn"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg><span>Takeback</span></button>
       <button class="ctl" id="pickBtn" title="Choose the bot's moves yourself" aria-pressed="false"><svg viewBox="0 0 24 24"><rect x="5" y="8" width="14" height="11" rx="3"/><path d="M12 8V4M10 13h.01M14 13h.01M9 19v2M15 19v2"/></svg>Bot move</button>
       <button class="ctl" id="flipBtn"><svg viewBox="0 0 24 24"><path d="M7 4v16M7 20l-3-3M7 20l3-3M17 20V4M17 4l-3 3M17 4l3 3"/></svg>Flip</button>
-      <button class="ctl" id="reviewBtn"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg>Review</button>
+      <button class="ctl" id="whatIfBtn" title="Try out moves for both sides without changing the game" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M9 9a3 3 0 1 1 4.5 2.6c-.9.5-1.5 1.2-1.5 2.4"/><path d="M12 18h.01"/><circle cx="12" cy="12" r="9"/></svg><span>What if?</span></button>
+      <button class="ctl" id="reviewBtn" hidden><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg>Review</button>
       <button class="ctl" id="resignBtn"><svg viewBox="0 0 24 24"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></svg><span>Resign</span></button>
     </div>
   `;
@@ -138,7 +142,7 @@ export function renderGame(view) {
 
   function material() {
     const counts = { w: { p: 0, n: 0, b: 0, r: 0, q: 0 }, b: { p: 0, n: 0, b: 0, r: 0, q: 0 } };
-    for (const row of chess.board()) for (const p of row) if (p && p.type !== 'k') counts[p.color][p.type]++;
+    for (const row of pos().board()) for (const p of row) if (p && p.type !== 'k') counts[p.color][p.type]++;
     const start = { p: 8, n: 2, b: 2, r: 2, q: 1 };
     const capturedBy = { w: [], b: [] }; // pieces captured BY color
     let score = { w: 0, b: 0 };
@@ -174,6 +178,13 @@ export function renderGame(view) {
   }
 
   function renderMoves() {
+    const mv = $('#moves', view);
+    if (st.sandbox) {
+      const line = st.sandbox.chess.history();
+      mv.innerHTML = `<span class="num">What if:</span>${line.map((m, i) => `<span class="mv ${i === line.length - 1 ? 'cur' : ''}">${esc(m)}</span>`).join('')}`;
+      mv.scrollLeft = mv.scrollWidth;
+      return;
+    }
     const hist = chess.history();
     let html = '';
     for (let i = 0; i < hist.length; i++) {
@@ -184,7 +195,6 @@ export function renderGame(view) {
       const col = mk ? `style="color:var(--${mk === 'inaccuracy' ? 'inacc' : mk})"` : '';
       html += `<span class="mv ${i === hist.length - 1 ? 'cur' : ''} ${picked}" ${col}>${esc(hist[i])}<span class="sym">${sym}</span></span>`;
     }
-    const mv = $('#moves', view);
     mv.innerHTML = html;
     mv.scrollLeft = mv.scrollWidth;
   }
@@ -196,6 +206,7 @@ export function renderGame(view) {
     const ply = chess.history().length;
     let s = data.evals[ply];
     for (let p = ply; s == null && p >= 0; p--) s = data.evals[p];
+    if (st.sandbox) s = st.sandbox.steps.findLast(x => x.analysis?.score)?.analysis.score ?? s;
     const cp = s ? scoreToCp(s) : 0;
     const pct = winPct(cp);
     bar.classList.toggle('flipped', board.orientation === 'b');
@@ -210,31 +221,44 @@ export function renderGame(view) {
   }
 
   function renderOpening() {
-    const o = lookupOpening(sans());
+    const o = st.sandbox ? null : lookupOpening(sans());
     $('#openingName', view).textContent = o ? `${o.eco} · ${o.name}` : '';
   }
 
   function setCoach(html) {
     st.coachHtml = html;
     $('#coachMsg', view).innerHTML = html;
-    const tb = $('#coachMsg [data-act="takeback"]', view);
-    if (tb) tb.addEventListener('click', () => undo());
+    const acts = { takeback: undo, whatif: openSandbox, compare: compareTop };
+    for (const a of view.querySelectorAll('#coachMsg [data-act]')) a.addEventListener('click', () => acts[a.dataset.act]());
   }
 
   function renderControls() {
     const over = !!data.result;
-    $('#hintBtn', view).disabled = over || st.thinking || chess.turn() !== data.playerColor;
-    $('#undoBtn', view).disabled = chess.history().length === 0 || (data.playerColor === 'b' && chess.history().length <= 1 && !data.pickBot);
+    const sb = st.sandbox;
+    const myTurn = !over && !st.thinking && chess.turn() === data.playerColor;
+    $('#hintBtn', view).disabled = !!sb || !myTurn;
+    $('#undoBtn', view).disabled = sb ? sb.busy || sb.steps.length < 2
+      : chess.history().length === 0 || (data.playerColor === 'b' && chess.history().length <= 1 && !data.pickBot);
+    $('#undoBtn span', view).textContent = sb ? 'Undo' : 'Takeback';
+    const whatIf = $('#whatIfBtn', view);
+    whatIf.hidden = over;
+    whatIf.disabled = !sb && !myTurn;
+    whatIf.classList.toggle('on', !!sb);
+    whatIf.setAttribute('aria-pressed', String(!!sb));
+    $('#whatIfBtn span', view).textContent = sb ? 'Back' : 'What if?';
     const pick = $('#pickBtn', view);
-    pick.disabled = over;
+    pick.disabled = over || !!sb;
     pick.classList.toggle('on', !!data.pickBot);
     pick.setAttribute('aria-pressed', String(!!data.pickBot));
-    $('#reviewBtn', view).disabled = !over;
+    $('#reviewBtn', view).hidden = !over;
+    $('#resignBtn', view).disabled = !!sb;
     $('#resignBtn span', view).textContent = over ? 'New game' : 'Resign';
   }
 
   function renderBoard(lastMove, animate = true) {
-    board.setPosition(chess.fen(), { lastMove, check: checkSquare(chess), animate });
+    const c = pos();
+    board.setPosition(c.fen(), { lastMove, check: checkSquare(c), animate });
+    if (st.sandbox) { board.setMovable(st.sandbox.busy || c.isGameOver() ? null : c.turn(), destsFrom(c)); return; }
     const myTurn = !data.result && chess.turn() === data.playerColor && !st.thinking;
     const mover = st.picking && !data.result ? chess.turn() : myTurn ? data.playerColor : null;
     board.setMovable(mover, destsFrom(chess));
@@ -245,8 +269,7 @@ export function renderGame(view) {
   }
 
   function lastMoveSquares() {
-    const h = chess.history({ verbose: true });
-    const m = h[h.length - 1];
+    const m = pos().history({ verbose: true }).at(-1);
     return m ? [m.from, m.to] : null;
   }
 
@@ -329,7 +352,7 @@ export function renderGame(view) {
   }
 
   function startPlayerTurn() {
-    st.hintStep = 0; st.hintMove = null;
+    st.hintStep = 0; st.hintMove = null; st.whatIfUsed = false;
     board.setMarks({});
     renderBoard(lastMoveSquares(), false);
     renderControls();
@@ -345,6 +368,7 @@ export function renderGame(view) {
   }
 
   async function onUserMove(from, to) {
+    if (st.sandbox) return sandboxMove(from, to);
     const picking = st.picking;
     const piece = chess.get(from);
     let promotion;
@@ -453,6 +477,7 @@ export function renderGame(view) {
   }
 
   function undo() {
+    if (st.sandbox) { sandboxBack(); return; }
     if (!chess.history().length) return;
     engine.stop();
     st.gen++;
@@ -493,10 +518,8 @@ export function renderGame(view) {
     const g = st.gen;
     if (!st.hintMove) {
       setCoach('Thinking about a hint…');
-      const r = st.turnAnalysis ? await st.turnAnalysis : await engine.analyse(chess.fen(), { depth: COACH_DEPTH });
-      if (g !== st.gen) return;
-      let res = r;
-      if (!res || res.cancelled || !res.bestmove) res = await engine.analyse(chess.fen(), { depth: COACH_DEPTH });
+      st.asking = true;
+      const res = await positionAnalysis().finally(() => { st.asking = false; });
       if (g !== st.gen || !res.bestmove) return;
       st.hintMove = uciToMove(res.bestmove);
       st.hintUci = res.bestmove;
@@ -513,10 +536,110 @@ export function renderGame(view) {
       board.setArrows([{ from: m.from, to: m.to, color: 'blue' }]);
       let ex = null;
       try { ex = explainEngineMove(chess.fen(), st.hintUci, st.hintAnalysis, chess.history({ verbose: true }).at(-1)); } catch (e) { console.error('explain failed', e); }
-      if (!ex) { setCoach('💡 The engine suggests the arrow move.'); return; }
+      if (!ex) { setCoach(`💡 The engine suggests the arrow move.${ASK_LINKS}`); return; }
       setCoach(`💡 The engine suggests <b>${esc(ex.san)}</b>.
         <ul class="why">${ex.reasons.map(r => `<li>${r}</li>`).join('')}</ul>
-        ${ex.line || ex.eval ? `<div class="small muted">${ex.line ? `Likely next: ${ex.line}` : ''}${ex.line && ex.eval ? ' · ' : ''}${ex.eval ? `${ex.line ? 'Then' : 'Overall'} ${ex.eval}` : ''}</div>` : ''}`);
+        ${ex.line || ex.eval ? `<div class="small muted">${ex.line ? `Likely next: ${ex.line}` : ''}${ex.line && ex.eval ? ' · ' : ''}${ex.eval ? `${ex.line ? 'Then' : 'Overall'} ${ex.eval}` : ''}</div>` : ''}${ASK_LINKS}`);
+    }
+  }
+
+  /** The engine's view of the current game position, reusing this turn's analysis when it finished. */
+  async function positionAnalysis() {
+    const r = st.turnAnalysis ? await st.turnAnalysis : null;
+    return r && !r.cancelled && r.bestmove ? r : engine.analyse(chess.fen(), { depth: COACH_DEPTH });
+  }
+
+  // ---------- "What if?" board ----------
+  // Moves are played on a copy, for either side. The game, its stats and its saved state stay as they were.
+  async function openSandbox() {
+    if (st.sandbox || st.asking || data.result || st.thinking || chess.turn() !== data.playerColor) return;
+    const counted = st.hintStep === 0 && !st.whatIfUsed; // seeing the engine's view is help, like a hint
+    if (counted) { data.hints++; save(); }
+    st.whatIfUsed = true;
+    const intro = `🔍 <b>What if?</b> Your game is paused. Play a move for either side to see what happens next.${counted ? ' <span class="muted">This counts as a hint.</span>' : ''}${COMPARE_LINK}`;
+    const sb = st.sandbox = {
+      chess: new Chess(chess.fen()), busy: true,
+      steps: [{ analysis: null, html: intro, arrows: board.arrows }],
+      restore: { coach: st.coachHtml, arrows: board.arrows, marks: board.marks },
+    };
+    setCoach(intro);
+    renderAll(lastMoveSquares(), false);
+    const r = await positionAnalysis();
+    if (st.sandbox !== sb) return;
+    sb.steps[0].analysis = r;
+    sb.busy = false;
+    renderAll(lastMoveSquares(), false);
+  }
+
+  function closeSandbox() {
+    const { restore } = st.sandbox;
+    st.sandbox = null;
+    board.setMarks(restore.marks);
+    board.setArrows(restore.arrows);
+    setCoach(restore.coach);
+    renderAll(lastMoveSquares(), false);
+  }
+
+  async function sandboxMove(from, to) {
+    const sb = st.sandbox;
+    if (sb.busy) return;
+    const piece = sb.chess.get(from);
+    let promotion;
+    if (piece && piece.type === 'p' && (to[1] === '8' || to[1] === '1')) {
+      promotion = getSettings().autoQueen ? 'q' : await board.promote(piece.color);
+      if (st.sandbox !== sb) return;
+      if (!promotion) { renderBoard(lastMoveSquares(), false); return; }
+    }
+    const fenBefore = sb.chess.fen();
+    let move;
+    try { move = sb.chess.move({ from, to, promotion }); } catch { renderBoard(lastMoveSquares(), false); return; }
+    sound.forMove(move, sb.chess);
+    sb.busy = true;
+    board.setArrows([]);
+    board.setMarks({});
+    setCoach('Looking at what happens…');
+    renderAll([move.from, move.to]);
+    const over = sb.chess.isGameOver();
+    const after = over ? null : await engine.analyse(sb.chess.fen(), { depth: COACH_DEPTH });
+    if (st.sandbox !== sb) return;
+    let shown = { html: 'The engine could not look at this position.', arrows: [] };
+    try { shown = whatIfMove(fenBefore, move.lan, sb.steps.at(-1).analysis, after, data.playerColor); } catch (e) { console.error('what if failed', e); }
+    sb.steps.push({ analysis: after, html: shown.html + (over ? '' : COMPARE_LINK), arrows: shown.arrows });
+    showSandboxStep();
+  }
+
+  function showSandboxStep() {
+    const sb = st.sandbox, step = sb.steps.at(-1);
+    sb.busy = false;
+    setCoach(step.html);
+    board.setArrows(step.arrows);
+    renderAll(lastMoveSquares(), false);
+  }
+
+  function sandboxBack() {
+    const sb = st.sandbox;
+    if (sb.busy || sb.steps.length < 2) return;
+    sb.chess.undo();
+    sb.steps.pop();
+    showSandboxStep();
+  }
+
+  /** Show the top engine moves side by side, on the game or on the What if? board. */
+  async function compareTop() {
+    const sb = st.sandbox, c = pos(), fen = c.fen();
+    if (st.asking || sb?.busy || c.isGameOver()) return;
+    st.asking = true;
+    if (sb) { sb.busy = true; renderBoard(lastMoveSquares(), false); renderControls(); }
+    setCoach('Comparing the top moves…');
+    const r = await engine.analyse(fen, { depth: COACH_DEPTH, multipv: 3 }).finally(() => { st.asking = false; });
+    if (st.sandbox !== sb || pos().fen() !== fen || r.cancelled) return;
+    const shown = compareMoves(fen, r, data.playerColor, c.history({ verbose: true }).at(-1) || null);
+    if (sb) {
+      Object.assign(sb.steps.at(-1), shown);
+      showSandboxStep();
+    } else {
+      setCoach(`${shown.html}<div class="coach-acts"><button data-act="whatif">What if…?</button></div>`);
+      board.setArrows(shown.arrows);
     }
   }
 
@@ -525,6 +648,7 @@ export function renderGame(view) {
   $('#undoBtn', view).addEventListener('click', undo);
   $('#pickBtn', view).addEventListener('click', togglePick);
   $('#flipBtn', view).addEventListener('click', () => { board.flip(); renderBars(); renderEval(); });
+  $('#whatIfBtn', view).addEventListener('click', () => (st.sandbox ? closeSandbox() : openSandbox()));
   $('#reviewBtn', view).addEventListener('click', () => { location.hash = '#/review'; });
   $('#resignBtn', view).addEventListener('click', async () => {
     if (data.result) { location.hash = '#/play'; return; }
@@ -537,7 +661,7 @@ export function renderGame(view) {
   });
 
   // ---------- start ----------
-  function destroy() { st.destroyed = true; st.gen++; engine.stop(); }
+  function destroy() { st.destroyed = true; st.gen++; st.sandbox = null; engine.stop(); }
 
   renderAll(lastMoveSquares(), false);
   loadOpenings().then(() => { if (!st.destroyed) renderOpening(); });
@@ -560,6 +684,9 @@ export function renderGame(view) {
 
   return destroy;
 }
+
+const COMPARE_LINK = '<div class="coach-acts"><button data-act="compare">Compare top moves</button></div>';
+const ASK_LINKS = '<div class="coach-acts"><button data-act="whatif">What if…?</button><button data-act="compare">Compare top moves</button></div>';
 
 const OPENING_TIPS = [
   'Start by taking the center with a pawn (e4 or d4).',

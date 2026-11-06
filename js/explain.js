@@ -1,7 +1,7 @@
 // Plain-language reasons why an engine move is strong, built from simple board
 // heuristics (captures, forks, threats, safety, development) plus the engine's main line.
 import { Chess } from '../vendor/chess.js';
-import { esc, PIECE_VALUE, uciToMove, scoreToCp, fmtScore } from './util.js';
+import { esc, PIECE_VALUE, uciToMove, scoreToCp, fmtScore, winPct, classify, CLASS_LABEL } from './util.js';
 
 const NAMES = { p: 'pawn', n: 'knight', b: 'bishop', r: 'rook', q: 'queen', k: 'king' };
 const val = t => (t === 'k' ? 100 : PIECE_VALUE[t]);
@@ -46,16 +46,20 @@ function mateThreat(chess) {
   return null;
 }
 
-/** SAN for a list of UCI moves, with move numbers. */
-/** A list of UCI moves as plain words (HTML): "you play Rb1, they reply Kg8, then you play dxc6". */
-export function movesInWords(fen, pv, max = 4) {
+/**
+ * A list of UCI moves as plain words (HTML): "you play Rb1, they reply Kg8, then you play dxc6".
+ * `me` is the side called "you"; it defaults to the side to move.
+ */
+export function movesInWords(fen, pv, max = 4, me = null) {
   const c = new Chess(fen);
+  const you = me || c.turn();
   const out = [];
   for (const uci of pv.slice(0, max)) {
+    const who = c.turn() === you ? 'you' : 'they';
     let m;
     try { m = c.move(uciToMove(uci)); } catch { break; }
     const i = out.length;
-    out.push(`${i === 2 ? 'then ' : ''}${i % 2 ? 'they reply' : 'you play'} <b>${esc(m.san)}</b>`);
+    out.push(`${i === 2 ? 'then ' : ''}${who} ${i % 2 ? 'reply' : 'play'} <b>${esc(m.san)}</b>`);
   }
   return out.join(', ');
 }
@@ -219,14 +223,116 @@ export function explainMove(fen, uci, analysis = {}, prev = null) {
     else add('A quiet improving move: no tactics yet, but it makes your position a bit better and keeps things balanced.');
   }
 
-  let evalText = '';
-  if (score) {
-    if (score.mate != null) evalText = Math.sign(score.mate) === sign ? `you mate in ${Math.abs(score.mate)}` : `they mate in ${Math.abs(score.mate)}`;
+  // No line when the tactic reason already spells it out.
+  return { san: m.san, reasons: reasons.slice(0, 3), line: pv.length > 1 && !showsLine ? movesInWords(fen, pv, 4) : '', eval: evalWords(score, me) };
+}
+
+/** How the position stands for `me`, in words. `score` is from White's point of view. */
+export function evalWords(score, me) {
+  if (!score) return '';
+  const sign = me === 'w' ? 1 : -1;
+  if (score.mate != null) return Math.sign(score.mate) === sign ? `you mate in ${Math.abs(score.mate)}` : `they mate in ${Math.abs(score.mate)}`;
+  const cp = sign * scoreToCp(score);
+  const s = fmtScore({ cp });
+  return cp > 300 ? `you're clearly better (${s})` : cp > 100 ? `you're better (${s})` : cp > 40 ? `you're slightly better (${s})`
+    : cp < -300 ? `you're clearly worse (${s})` : cp < -100 ? `you're worse (${s})` : cp < -40 ? `you're slightly worse (${s})` : `about equal (${s})`;
+}
+
+const tryMove = (fen, uci) => { try { return new Chess(fen).move(uciToMove(uci)); } catch { return null; } };
+const reasonList = reasons => (reasons.length ? `<ul class="why">${reasons.map(r => `<li>${r}</li>`).join('')}</ul>` : '');
+const footnote = (line, ev) => (line || ev ? `<div class="small muted">${line ? `Likely next: ${line}` : ''}${line && ev ? ' · ' : ''}${ev ? `${line ? 'Then' : 'Overall'} ${ev}` : ''}</div>` : '');
+
+/** The end of the game in words, or '' while it goes on. `c` has just had move `m` played. */
+function endInWords(c, m, me) {
+  if (c.isCheckmate()) return `<b>${esc(m.san)}</b> is checkmate, so ${m.color === me ? 'you win' : 'you would lose'}.`;
+  if (c.isStalemate()) return `<b>${esc(m.san)}</b> is stalemate, so the game is a draw.`;
+  if (c.isDraw()) return `<b>${esc(m.san)}</b> ends the game in a draw.`;
+  return '';
+}
+
+/**
+ * What a move tried out on the analysis board leads to.
+ * `before` and `after` are engine results for the positions either side of the move; neither is
+ * needed when the move ends the game. `me` is the player's colour, whichever side moved.
+ * -> { html, arrows: [{from, to, color}] }
+ */
+export function whatIfMove(fen, uci, before, after, me) {
+  const c = new Chess(fen);
+  const m = c.move(uciToMove(uci));
+  const end = endInWords(c, m, me);
+  if (end) return { html: end, arrows: [] };
+
+  const fenAfter = c.fen();
+  const mine = m.color === me;
+  const sign = m.color === 'w' ? 1 : -1;
+  const drop = winPct(sign * scoreToCp(before.score)) - winPct(sign * scoreToCp(after.score));
+  const cls = classify(drop, before.bestmove === uci);
+  const best = tryMove(fen, before.bestmove);
+  const san = `<b>${esc(m.san)}</b>`;
+  const bestSan = best ? `<b>${esc(best.san)}</b>` : 'another move';
+  const reply = after.bestmove && tryMove(fenAfter, after.bestmove);
+  const pv = after.lines?.[0]?.pv || [];
+  const arrows = reply ? [{ from: reply.from, to: reply.to, color: mine ? 'red' : 'green' }] : [];
+
+  if (mine) {
+    let text = `<span class="tag ${cls}">${CLASS_LABEL[cls]}</span> `;
+    if (cls === 'best') text += `${san} is as good as anything here.`;
+    else if (cls === 'good') text += `${san} is fine, but ${bestSan} is slightly better.`;
     else {
-      const s = fmtScore({ cp }); // from your point of view
-      evalText = cp > 300 ? `you're clearly better (${s})` : cp > 100 ? `you're better (${s})` : cp > 40 ? `you're slightly better (${s})`
-        : cp < -300 ? `you're clearly worse (${s})` : cp < -100 ? `you're worse (${s})` : cp < -40 ? `you're slightly worse (${s})` : `about equal (${s})`;
+      text += `${san} is weaker than ${bestSan}. ` + mistakeReason(fen, uci, {
+        bestUci: before.bestmove, replyUci: after.bestmove,
+        mateAgainst: after.score.mate != null && Math.sign(after.score.mate) === -sign,
+        hadMate: before.score.mate != null && Math.sign(before.score.mate) === sign,
+      });
     }
+    if (reply) text += ` Their best reply is <b>${esc(reply.san)}</b>.`;
+    return { html: text + footnote(pv.length > 1 ? movesInWords(fenAfter, pv, 4, me) : '', evalWords(after.score, me)), arrows };
   }
-  return { san: m.san, reasons: reasons.slice(0, 3), line: pv.length > 1 && !showsLine ? movesInWords(fen, pv, 4) : '', eval: evalText }; // no line when the tactic reason already spells it out
+
+  const verdict = cls === 'best' ? `${san} is their best move here.`
+    : cls === 'good' ? `${san} is a reasonable try for them.`
+      : `${san} would be a mistake by them: ${bestSan} is stronger.`;
+  if (!reply) return { html: verdict, arrows };
+  const ex = explainMove(fenAfter, after.bestmove, after, m);
+  return { html: `${verdict} Your best answer is <b>${esc(ex.san)}</b>.${reasonList(ex.reasons)}${footnote(ex.line, ex.eval)}`, arrows };
+}
+
+/**
+ * The engine's top moves side by side, and why the first one beats the rest.
+ * `analysis` needs several lines (multipv). `prev` is the move that led to `fen`.
+ * -> { html, arrows: [{from, to, color}] }
+ */
+export function compareMoves(fen, analysis, me, prev = null) {
+  const c = new Chess(fen);
+  const mine = c.turn() === me;
+  const sign = c.turn() === 'w' ? 1 : -1;
+  const lines = (analysis.lines || []).map(l => ({ ...l, m: tryMove(fen, l.move) })).filter(l => l.m).slice(0, 3);
+  if (!lines.length) return { html: 'No moves to compare here.', arrows: [] };
+
+  const pct = l => winPct(sign * scoreToCp(l.score));
+  const top = lines[0];
+  const topSan = `<b>${esc(top.m.san)}</b>`;
+  const gap = lines[1] ? pct(top) - pct(lines[1]) : 0;
+  const whose = mine ? '' : ' for them';
+  const summary = c.moves().length === 1 ? `${topSan} is the only legal move.`
+    : gap >= 7 ? `${topSan} clearly stands out${whose}.`
+      : gap >= 2 ? `${topSan} is a little better than the alternatives${whose}.`
+        : `Several moves are about equally good${whose}.`;
+
+  const rows = lines.map((l, i) => {
+    let note = '';
+    if (mine && i === 0) note = explainMove(fen, l.move, { score: l.score, lines: [l] }, prev).reasons[0] || '';
+    else if (mine && pct(top) - pct(l) < 2) note = 'About as good.';
+    else if (mine) {
+      note = mistakeReason(fen, l.move, {
+        bestUci: top.move, replyUci: l.pv[1],
+        mateAgainst: l.score.mate != null && Math.sign(l.score.mate) === -sign,
+        hadMate: top.score.mate != null && Math.sign(top.score.mate) === sign,
+      });
+    }
+    const line = l.pv.length > 1 ? movesInWords(fen, l.pv, 3, me) : '';
+    return `<li><b>${esc(l.m.san)}</b> <span class="muted">${evalWords(l.score, me)}</span>${note ? `<div>${note}</div>` : ''}${line ? `<div class="small muted">${line}</div>` : ''}</li>`;
+  });
+  const colors = ['green', 'blue', 'grey'];
+  return { html: `${summary}<ol class="why compare">${rows.join('')}</ol>`, arrows: lines.map((l, i) => ({ from: l.m.from, to: l.m.to, color: colors[i] })) };
 }

@@ -8,7 +8,7 @@ import { LESSONS } from '../js/lessons.js';
 import { COURSES } from '../js/courses.js';
 import { engine } from '../js/engine.js';
 import { BOTS, botMove } from '../js/bots.js';
-import { explainMove, mistakeReason } from '../js/explain.js';
+import { explainMove, mistakeReason, movesInWords, whatIfMove, compareMoves } from '../js/explain.js';
 import { loadOpenings, isBook } from '../js/openings.js';
 import { scoreToCp, uciToMove } from '../js/util.js';
 
@@ -145,6 +145,28 @@ async function run() {
   log(/pawn on f5/.test(plain(explainMove('4k3/8/8/4Pp2/8/8/8/4K3 w - f6 0 1', 'e5f6'))), 'en passant names the captured pawn\'s square');
   const ruy = 'r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3';
   log(mistakeReason(ruy, 'a7a6', { replyUci: 'b5c6' }) === '', 'a fair trade is not called a loss');
+
+  // ---------- what if ----------
+  const strip = h => h.replace(/<[^>]+>/g, '');
+  log(strip(movesInWords(new Chess().fen(), ['e2e4', 'e7e5', 'g1f3'])) === 'you play e4, they reply e5, then you play Nf3', 'line in words from the mover');
+  log(strip(movesInWords(new Chess().fen(), ['e2e4', 'e7e5'], 4, 'b')) === 'they play e4, you reply e5', 'line in words when the opponent moves first');
+  const fool = 'rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq - 0 2';
+  log(/checkmate, so you win/.test(strip(whatIfMove(fool, 'd8h4', null, null, 'b').html)), 'what if: your mate is a win');
+  log(/checkmate, so you would lose/.test(strip(whatIfMove(fool, 'd8h4', null, null, 'w').html)), 'what if: their mate is a loss');
+  const afterMove = (fen, uci) => { const t = new Chess(fen); t.move(uciToMove(uci)); return t.fen(); };
+  const open4 = 'r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3';
+  const wi0 = await engine.analyse(open4, { depth: 11 });
+  const fen1 = afterMove(open4, 'f3e5');
+  const wi1 = await engine.analyse(fen1, { depth: 11 });
+  const mineWi = whatIfMove(open4, 'f3e5', wi0, wi1, 'w');
+  log(/Their best reply is/.test(strip(mineWi.html)) && mineWi.arrows.length === 1, 'what if: your move shows their reply: ' + strip(mineWi.html));
+  const wi2 = await engine.analyse(afterMove(fen1, wi1.bestmove), { depth: 11 });
+  const theirWi = whatIfMove(fen1, wi1.bestmove, wi1, wi2, 'w');
+  log(/their best move/.test(strip(theirWi.html)) && /Your best answer is/.test(strip(theirWi.html)), 'what if: their best move shows your answer: ' + strip(theirWi.html));
+  const cmp = compareMoves(open4, await engine.analyse(open4, { depth: 11, multipv: 3 }), 'w');
+  log(cmp.arrows.length === 3 && (cmp.html.match(/<li>/g) || []).length === 3, 'compare lists three moves: ' + strip(cmp.html).slice(0, 160));
+  const forced = '7k/8/8/8/8/8/6q1/7K w - - 0 1';
+  log(/only legal move/.test(strip(compareMoves(forced, await engine.analyse(forced, { depth: 8, multipv: 3 }), 'w').html)), 'compare says when there is one legal move');
   log(/queen on e5 can be taken/.test(mistakeReason('r1b1kbnr/pppp1ppp/2n5/4p2Q/4P3/8/PPPP1PPP/RNB1KBNR w KQkq - 2 3', 'h5e5', { replyUci: 'c6e5' })), 'a hanging piece is called out');
 
   lines.unshift(fails ? `RESULT: ${fails} FAILURES` : 'RESULT: ALL PASSED');
