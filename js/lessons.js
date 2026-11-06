@@ -99,6 +99,19 @@ export const LESSONS = [
     ],
   },
 
+  {
+    id: 'traps', section: 'opening', title: 'Opening traps', sub: "Fool's mate and Légal's mate",
+    steps: [
+      { text: `<h3>Learn from traps</h3><p>Opening traps are worth knowing, not to play for them, but because each one teaches a rule:</p><ul><li>Don't weaken the pawns in front of your king.</li><li>Don't grab material without checking what your opponent gets in return.</li><li>A pin against the queen is not a pin against the king: the pinned piece <b>can</b> move.</li></ul>` },
+      { text: `<h3>Fool's mate</h3><p>White has pushed the f- and g-pawns, opening the diagonal to the king. You are Black. Deliver checkmate in one move.</p>`,
+        line: 'f3 e5 g4', task: { solution: ['d8h4'], mate: true },
+        success: "Checkmate! This is Fool's mate, the fastest checkmate possible. The f- and g-pawns shield your king, so don't push them early." },
+      { text: `<h3>Légal's mate</h3><p>Black's bishop pins your knight to your queen, and Black has just played the slow g6. But this is only a <b>relative</b> pin: the knight is allowed to move.</p><p>Break the pin and win a pawn. If Black greedily grabs your queen, you have checkmate in three more moves.</p>`,
+        line: 'e4 e5 Nf3 d6 Bc4 Bg4 Nc3 g6', arrows: [['g4', 'd1', 'red']],
+        task: { solution: ['f3e5', 'g4d1', 'c4f7', 'e8e7', 'c3d5'], mate: true },
+        success: "Légal's mate! Three minor pieces beat a whole queen. If Black had played 5...dxe5 instead, 6.Qxg4 would simply win a pawn." },
+    ],
+  },
   // ------------------------------------------------------------------ TACTICS
   {
     id: 'forks', section: 'tactics', title: 'Forks', sub: 'One piece attacks two',
@@ -136,6 +149,26 @@ export const LESSONS = [
     ],
   },
   {
+    id: 'doublecheck', section: 'tactics', title: 'Double check', sub: 'Two checks at once',
+    steps: [
+      { text: `<h3>Double check</h3><p>A <b>double check</b> is a discovered check where the piece that moves <b>also</b> gives check. The king is attacked by two pieces at once.</p><p>You can't block two lines with one move, and you can't capture two pieces at once. So against a double check, <b>the king must move</b>. If it has nowhere to go, it is checkmate.</p>` },
+      { text: `<h3>Your turn</h3><p>Your knight on e4 stands between your rook and the black king. Move the knight so that it gives check too, and it is checkmate.</p>`,
+        fen: 'r2qkb1r/pp1p1ppp/8/8/4N3/8/PP3PPP/4R1K1 w kq - 0 1', arrows: [['e1', 'e8', 'red']],
+        task: { solution: ['e4d6'], accept: ['e4d6', 'e4f6'], mate: true },
+        success: 'Checkmate by double check! Black is a queen up and could capture your knight, but that does nothing about the rook. The king has no square, so it\'s over.' },
+    ],
+  },
+  {
+    id: 'defender', section: 'tactics', title: 'Removing the defender', sub: 'Capture the piece that guards',
+    steps: [
+      { text: `<h3>Remove the guard</h3><p>Sometimes a piece is only safe because <b>one</b> other piece defends it. Capture or chase away that defender, and the piece it was guarding falls.</p><p>Your rook attacks the bishop on d5. Only the knight on f6 defends it. Remove the defender!</p>`,
+        fen: '6k1/5ppp/5n2/3b2B1/8/8/5PPP/3R2K1 w - - 0 1', arrows: [['d1', 'd5', 'red'], ['f6', 'd5', 'yellow']],
+        task: { solution: ['g5f6'] },
+        success: 'Bxf6! After ...gxf6, Rxd5 wins the bishop. If Black saves the bishop instead, you have simply won the knight.' },
+      { text: `<h3>How to spot it</h3><p>When you attack a piece and it is defended, don't give up. Ask: <i>"What defends it? Can I capture, chase or distract that defender?"</i></p><p>A piece that has to guard something is said to be <b>overloaded</b> if it has two jobs at once. Overloaded pieces are perfect targets.</p>` },
+    ],
+  },
+  {
     id: 'hanging', section: 'tactics', title: 'Hanging pieces', sub: 'Spot free material',
     steps: [
       { text: `<h3>Look for free pieces</h3><p>Most games between beginners are decided by pieces left <b>undefended</b>. After every opponent move, ask: <i>"Is anything of theirs undefended? Did they leave something hanging?"</i></p><p>Black just played Bc5. Is that bishop safe?</p>`,
@@ -159,6 +192,17 @@ export const LESSONS = [
     steps: [
       { text: `<h3>Smothered mate</h3><p>When the king is completely surrounded by its own pieces, a single knight check can be checkmate.</p><p>Find the knight checkmate.</p>`,
         fen: '6rk/6pp/8/6N1/8/8/8/6K1 w - - 0 1', task: { solution: ['g5f7'], mate: true }, success: 'Smothered mate! The king is trapped by its own rook and pawns.' },
+    ],
+  },
+  {
+    id: 'arabian', section: 'mates', title: 'Rook and knight mates', sub: "Arabian and Anastasia's mate",
+    steps: [
+      { text: `<h3>Arabian mate</h3><p>One of the oldest known checkmates. A knight guards the rook and covers an escape square, and the rook mates the king in the corner.</p><p>Your knight on f6 covers h7 and g8. Checkmate in one move.</p>`,
+        fen: '7k/1R6/5N2/8/8/8/6PP/6K1 w - - 0 1', task: { solution: ['b7h7'], mate: true },
+        success: 'Arabian mate! The rook checks, the knight protects it and covers g8.' },
+      { text: `<h3>Anastasia's mate</h3><p>A knight on e7 takes away g8 and g6. If the h-file opens, a rook delivers mate on it.</p><p>Black is a queen up and threatening you, so you must strike now. Sacrifice to open the h-file: checkmate in two.</p>`,
+        fen: 'r4r1k/pp2N1pp/8/7Q/8/4R3/1q3PPP/6K1 w - - 0 1', task: { solution: ['h5h7', 'h8h7', 'e3h3'], mate: true },
+        success: "Anastasia's mate! The queen sacrifice dragged the king to h7, where the knight and rook trap it." },
     ],
   },
   {
@@ -203,6 +247,16 @@ export const LESSONS = [
     ],
   },
   {
+    id: 'breakthrough', section: 'endgame', title: 'Passed pawns', sub: 'Create one and push it',
+    steps: [
+      { text: `<h3>Passed pawns must be pushed</h3><p>A <b>passed pawn</b> has no enemy pawns in front of it or on the files next to it. Nothing but pieces can stop it, so it ties down the enemy king or pieces.</p><p>Here White's d-pawn is passed. The black king has to go and stop it, and then the white king is free to attack the kingside pawns.</p>`,
+        fen: '8/5kpp/8/8/3P4/8/5KPP/8 w - - 0 1', marks: { d4: 'good', d5: 'mark', d6: 'mark', d7: 'mark', d8: 'mark' } },
+      { text: `<h3>The breakthrough</h3><p>Three pawns against three, and both kings are far away. White can force a passed pawn with a pawn sacrifice. Find the breakthrough!</p>`,
+        fen: '8/ppp4k/8/PPP5/8/8/7K/8 w - - 0 1', task: { solution: ['b5b6', 'a7b6', 'c5c6', 'b7c6', 'a5a6'] },
+        success: 'The a-pawn is through and will queen before the king can catch it. If Black takes with the c-pawn instead (1...cxb6), 2.a6! works the same way.' },
+    ],
+  },
+  {
     id: 'rookend', section: 'endgame', title: 'Rook endgame rules', sub: 'Principles for the most common endgame',
     steps: [
       { text: `<h3>Rooks belong behind passed pawns</h3><p>Put your rook <b>behind</b> a passed pawn, yours or your opponent's. Behind your own pawn, the rook supports it all the way. Behind the enemy pawn, it gets more active as the pawn advances.</p>`,
@@ -212,6 +266,18 @@ export const LESSONS = [
     ],
   },
 
+  {
+    id: 'lucena', section: 'endgame', title: 'The Lucena position', sub: 'Build a bridge to promote',
+    steps: [
+      { text: `<h3>The most important rook endgame</h3><p>Your pawn is on the 7th rank with your king in front of it, and your rook on the f-file keeps the black king away. But the black rook stops your king from leaving via the e-file, and if your king steps out to c7, the black rook just checks it along the c-file.</p><p>The winning method is called <b>building a bridge</b>:</p><ul><li>Put your rook on the <b>4th rank</b>.</li><li>Walk your king out. When the checks come, step toward your rook.</li><li>When the king reaches the 5th rank, <b>block the check with the rook</b>. The checks are over and the pawn promotes.</li></ul>`,
+        fen: '3K4/3P2k1/8/8/8/8/4r3/5R2 w - - 0 1', arrows: [['f1', 'f4', 'green']] },
+      { text: `<h3>Start the bridge</h3><p>Play the first move of the bridge.</p>`,
+        fen: '3K4/3P2k1/8/8/8/8/4r3/5R2 w - - 0 1', task: { solution: ['f1f4'], teach: true },
+        success: 'Rf4! Next comes Kc7, and against the checks Kd6, Ke6, Kd5 and then Rd4 blocks.' },
+      { text: `<h3>Your turn</h3><p>Promote the pawn against the computer. Build the bridge!</p>`,
+        fen: '3K4/3P2k1/8/8/8/8/4r3/5R2 w - - 0 1', play: { goal: 'promote' }, success: 'You won the Lucena position! Every strong player knows this technique.' },
+    ],
+  },
   // ------------------------------------------------------------------ THINKING
   {
     id: 'cct', section: 'thinking', title: 'Checks, captures, threats', sub: 'A checklist for every move',
