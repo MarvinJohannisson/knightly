@@ -15,7 +15,7 @@ let cleanup = null;
 const routes = {
   '': { title: 'Knightly', tab: 'home', render: renderHome },
   'play': { title: 'Play', tab: 'play', render: renderPlaySetup },
-  'game': { title: 'Game', tab: 'play', back: '#/play', render: renderGame },
+  'game': { title: 'Game', tab: 'play', back: '#/play', render: renderGame, viewClass: 'game-view' },
   'review': { title: 'Game review', tab: 'play', back: '#/play', render: renderReview },
   'puzzles': { title: 'Puzzles', tab: 'puzzles', render: renderPuzzleHub },
   'puzzle': { title: 'Puzzle', tab: 'puzzles', back: '#/puzzles', render: renderPuzzle,
@@ -37,6 +37,7 @@ function route() {
   $('#backBtn').onclick = () => { location.hash = r.back; };
   $$('#tabbar a').forEach(a => a.classList.toggle('active', a.dataset.tab === r.tab));
   view.innerHTML = '';
+  view.className = r.viewClass ? `view ${r.viewClass}` : 'view';
   window.scrollTo(0, 0);
   try { cleanup = r.render(view, param) || null; }
   catch (e) { console.error(e); view.innerHTML = `<div class="card">Something went wrong: ${esc(e.message)}</div>`; }
@@ -111,6 +112,7 @@ function renderSettings(v) {
     <div class="card">
       ${tog('coach', 'Coach', 'Comments on your moves while playing bots')}
       ${tog('evalBar', 'Evaluation bar', 'Shows who is better during games')}
+      ${tog('moveList', 'Move history', 'Shows the list of moves during games')}
     </div>
     <div class="section-title">Data</div>
     <div class="card">

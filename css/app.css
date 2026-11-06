@@ -224,6 +224,17 @@ body.no-coords .board .coord { display: none; }
 @keyframes blink { 50% { opacity: .2; } }
 
 /* ---------- Game ---------- */
+/* On phones, spare height goes above the board so it sits within thumb reach. */
+@media (max-width: 600px) {
+  .game-view {
+    display: flex; flex-direction: column;
+    min-height: calc(100vh - var(--top-h) - env(safe-area-inset-top, 0px));
+    min-height: calc(100dvh - var(--top-h) - env(safe-area-inset-top, 0px));
+    padding-bottom: calc(var(--tab-h) + 12px + env(safe-area-inset-bottom, 0px));
+  }
+  .game-view > * { flex: none; width: 100%; }
+  .game-view > :first-child { margin-top: auto; }
+}
 .coach {
   display: flex; gap: 10px; align-items: flex-start; margin: 8px auto 0; max-width: 560px;
   background: var(--surface); border: 1px solid #312e2a; border-radius: var(--radius); padding: 10px 12px; min-height: 58px;

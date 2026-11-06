@@ -52,6 +52,8 @@ export function renderPlaySetup(view) {
         <span class="switch"><input type="checkbox" id="coachT" ${s.coach ? 'checked' : ''}><span></span></span></label>
       <label class="toggle-row"><div><div class="label">Evaluation bar</div><div class="desc">Shows who is better</div></div>
         <span class="switch"><input type="checkbox" id="evalT" ${s.evalBar ? 'checked' : ''}><span></span></span></label>
+      <label class="toggle-row"><div><div class="label">Move history</div><div class="desc">Shows the list of moves</div></div>
+        <span class="switch"><input type="checkbox" id="moveListT" ${s.moveList ? 'checked' : ''}><span></span></span></label>
     </div>
     <div style="margin-top:16px"><button class="btn primary big" id="startBtn">Play</button></div>
   `;
@@ -79,6 +81,7 @@ export function renderPlaySetup(view) {
   });
   $('#coachT', view).addEventListener('change', e => setSetting('coach', e.target.checked));
   $('#evalT', view).addEventListener('change', e => setSetting('evalBar', e.target.checked));
+  $('#moveListT', view).addEventListener('change', e => setSetting('moveList', e.target.checked));
   $('#startBtn', view).addEventListener('click', async () => {
     const cur = store.get('game', null);
     if (cur && !cur.result && cur.moves.length > 1) {
@@ -120,7 +123,7 @@ export function renderGame(view) {
     <div class="board-wrap" id="boardWrap"><div class="evalbar" id="evalBar" ${settings.evalBar ? '' : 'hidden'}><div class="fill"></div><div class="num"></div></div></div>
     <div class="player-bar" id="meBar"></div>
     <div class="coach" id="coach"><div class="avatar">🎓</div><div class="grow"><div class="msg" id="coachMsg"></div><div class="opening" id="openingName"></div></div></div>
-    <div class="moves" id="moves"></div>
+    <div class="moves" id="moves" ${settings.moveList ? '' : 'hidden'}></div>
     <div class="controls">
       <button class="ctl" id="hintBtn"><svg viewBox="0 0 24 24"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.4 1 1.1 1 1.8V16h5v-.3c0-.7.4-1.4 1-1.8A6 6 0 0 0 12 3z"/></svg>Hint</button>
       <button class="ctl" id="undoBtn"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg><span>Takeback</span></button>

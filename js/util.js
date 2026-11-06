@@ -48,7 +48,7 @@ export const store = {
 // ---------- Settings ----------
 const DEFAULT_SETTINGS = {
   board: 'forest', coords: true, sound: true, dests: true, autoQueen: false,
-  coach: true, evalBar: false, animation: true,
+  coach: true, evalBar: false, moveList: true, animation: true,
 };
 export function getSettings() { return { ...DEFAULT_SETTINGS, ...store.get('settings', {}) }; }
 export function setSetting(k, v) { const s = getSettings(); s[k] = v; store.set('settings', s); applySettings(); }
