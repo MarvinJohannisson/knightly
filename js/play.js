@@ -113,10 +113,13 @@ export function renderGame(view) {
   const chess = new Chess();
   for (const u of data.moves) { try { chess.move(uciToMove(u)); } catch { break; } }
   data.moves = chess.history({ verbose: true }).map(m => m.lan);
-  data.picked = data.picked || {}; // plies where the player chose the bot's move
+  // Plies where the player chose the bot's move, in a game started while the app still had a
+  // "Bot move" button. Such a game stays out of the stats; new games never have any.
+  data.picked = data.picked || {};
+  delete data.pickBot;
 
   const st = {
-    gen: 0, thinking: false, picking: false, turnAnalysis: null,
+    gen: 0, thinking: false, turnAnalysis: null,
     hint: null,    // { uci, analysis, step } for the position on the board
     help: null,    // the deeper analysis behind hints and comparisons, one per position
     helped: false, // has this position already been counted as a hint?
@@ -136,8 +139,6 @@ export function renderGame(view) {
     <div class="controls bottom-bar">
       <button class="ctl" id="hintBtn"><svg viewBox="0 0 24 24"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.4 1 1.1 1 1.8V16h5v-.3c0-.7.4-1.4 1-1.8A6 6 0 0 0 12 3z"/></svg>Hint</button>
       <button class="ctl" id="undoBtn"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg><span>Takeback</span></button>
-      <button class="ctl" id="pickBtn" title="Choose the bot's moves yourself" aria-pressed="false"><svg viewBox="0 0 24 24"><rect x="5" y="8" width="14" height="11" rx="3"/><path d="M12 8V4M10 13h.01M14 13h.01M9 19v2M15 19v2"/></svg>Bot move</button>
-      <button class="ctl" id="flipBtn"><svg viewBox="0 0 24 24"><path d="M7 4v16M7 20l-3-3M7 20l3-3M17 20V4M17 4l-3 3M17 4l3 3"/></svg>Flip</button>
       <button class="ctl" id="whatIfBtn" title="Try out moves for both sides without changing the game" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M9 9a3 3 0 1 1 4.5 2.6c-.9.5-1.5 1.2-1.5 2.4"/><path d="M12 18h.01"/><circle cx="12" cy="12" r="9"/></svg><span>What if?</span></button>
       <button class="ctl" id="reviewBtn" hidden><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg>Review</button>
       <button class="ctl" id="resignBtn"><svg viewBox="0 0 24 24"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></svg><span>Resign</span></button>
@@ -169,13 +170,13 @@ export function renderGame(view) {
     return { capturedBy, diff: score.w - score.b };
   }
 
-  function barHtml(name, sub, avatar, color, thinking, picking) {
+  function barHtml(name, sub, avatar, color, thinking) {
     const m = material();
     const caps = m.capturedBy[color];
     const adv = color === 'w' ? m.diff : -m.diff;
     const opp = color === 'w' ? 'b' : 'w';
     return `<div class="avatar">${avatar}</div><div class="grow">
-      <div><span class="name">${esc(name)}</span><span class="rating">${esc(sub)}</span>${thinking ? '<span class="thinking"><i></i><i></i><i></i></span>' : ''}${picking ? '<span class="pick-tag">Choose a move</span>' : ''}</div>
+      <div><span class="name">${esc(name)}</span><span class="rating">${esc(sub)}</span>${thinking ? '<span class="thinking"><i></i><i></i><i></i></span>' : ''}</div>
       <div class="captured">${caps.map(t => `<img src="${pieceImg(opp, t)}" alt="">`).join('')}${adv > 0 ? `<span class="adv">+${adv}</span>` : ''}</div>
     </div>`;
   }
@@ -183,7 +184,7 @@ export function renderGame(view) {
   function renderBars() {
     const botColor = data.playerColor === 'w' ? 'b' : 'w';
     const topIsBot = board.orientation === data.playerColor;
-    const botHtml = barHtml(bot.name, `~${bot.rating}`, bot.avatar, botColor, st.thinking, st.picking);
+    const botHtml = barHtml(bot.name, `~${bot.rating}`, bot.avatar, botColor, st.thinking);
     const meHtml = barHtml('You', '', '🙂', data.playerColor, false);
     $('#oppBar', view).innerHTML = topIsBot ? botHtml : meHtml;
     $('#meBar', view).innerHTML = topIsBot ? meHtml : botHtml;
@@ -250,7 +251,7 @@ export function renderGame(view) {
     const myTurn = !over && !st.thinking && chess.turn() === data.playerColor;
     $('#hintBtn', view).disabled = !!sb || !myTurn;
     $('#undoBtn', view).disabled = sb ? sb.busy || sb.steps.length < 2
-      : chess.history().length === 0 || (data.playerColor === 'b' && chess.history().length <= 1 && !data.pickBot);
+      : chess.history().length === 0 || (data.playerColor === 'b' && chess.history().length <= 1);
     $('#undoBtn span', view).textContent = sb ? 'Undo' : 'Takeback';
     const whatIf = $('#whatIfBtn', view);
     whatIf.hidden = over;
@@ -258,10 +259,6 @@ export function renderGame(view) {
     whatIf.classList.toggle('on', !!sb);
     whatIf.setAttribute('aria-pressed', String(!!sb));
     $('#whatIfBtn span', view).textContent = sb ? 'Back' : 'What if?';
-    const pick = $('#pickBtn', view);
-    pick.disabled = over || !!sb;
-    pick.classList.toggle('on', !!data.pickBot);
-    pick.setAttribute('aria-pressed', String(!!data.pickBot));
     $('#reviewBtn', view).hidden = !over;
     $('#resignBtn', view).disabled = !!sb;
     $('#resignBtn span', view).textContent = over ? 'New game' : 'Resign';
@@ -272,8 +269,7 @@ export function renderGame(view) {
     board.setPosition(c.fen(), { lastMove, check: checkSquare(c), animate });
     if (st.sandbox) { board.setMovable(st.sandbox.busy || c.isGameOver() ? null : c.turn(), destsFrom(c)); return; }
     const myTurn = !data.result && chess.turn() === data.playerColor && !st.thinking;
-    const mover = st.picking && !data.result ? chess.turn() : myTurn ? data.playerColor : null;
-    board.setMovable(mover, destsFrom(chess));
+    board.setMovable(myTurn ? data.playerColor : null, destsFrom(chess));
   }
 
   function renderAll(lastMove, animate) {
@@ -304,7 +300,6 @@ export function renderGame(view) {
 
   function finish(r) {
     data.result = r;
-    st.picking = false;
     board.setMovable(null);
     const whatIf = isWhatIf();
     const helped = data.takebacks + data.hints > 0;
@@ -381,24 +376,21 @@ export function renderGame(view) {
 
   async function onUserMove(from, to) {
     if (st.sandbox) return sandboxMove(from, to);
-    const picking = st.picking;
     const piece = chess.get(from);
     let promotion;
     if (piece && piece.type === 'p' && (to[1] === '8' || to[1] === '1')) {
       promotion = getSettings().autoQueen ? 'q' : await board.promote(piece.color);
-      if (!promotion || picking !== st.picking) { renderBoard(lastMoveSquares(), false); return; }
+      if (!promotion) { renderBoard(lastMoveSquares(), false); return; }
     }
     let move;
     const fenBefore = chess.fen();
     try { move = chess.move({ from, to, promotion }); } catch { renderBoard(lastMoveSquares(), false); return; }
     sound.forMove(move, chess);
-    if (picking) { st.picking = false; data.picked[chess.history().length] = true; }
     board.setArrows([]);
     board.setMarks({});
     renderAll([move.from, move.to]);
     save();
     if (checkEnd()) return;
-    if (picking) { startPlayerTurn(); return; }
     await coachAndReply(move, fenBefore);
   }
 
@@ -496,7 +488,6 @@ export function renderGame(view) {
   }
 
   async function botTurn() {
-    if (data.pickBot) { st.picking = true; renderAll(lastMoveSquares(), false); return; }
     const g = st.gen;
     st.thinking = true; renderBars(); renderControls();
     board.setMovable(null);
@@ -525,9 +516,7 @@ export function renderGame(view) {
     engine.stop();
     st.gen++;
     st.thinking = false;
-    st.picking = false;
-    // While choosing the bot's moves, step back one move at a time so either side can be replayed.
-    do { chess.undo(); } while (!data.pickBot && chess.history().length > 0 && chess.turn() !== data.playerColor);
+    do { chess.undo(); } while (chess.history().length > 0 && chess.turn() !== data.playerColor);
     const ply = chess.history().length;
     for (const k of Object.keys(data.marks)) if (+k > ply) delete data.marks[k];
     for (const k of Object.keys(data.evals)) if (+k > ply) delete data.evals[k];
@@ -539,21 +528,6 @@ export function renderGame(view) {
     renderAll(lastMoveSquares());
     save();
     if (chess.turn() !== data.playerColor) botTurn(); else startPlayerTurn();
-  }
-
-  function togglePick() {
-    if (data.result) return;
-    data.pickBot = !data.pickBot;
-    toast(data.pickBot ? `You choose ${bot.name}'s moves. Takeback now goes back one move at a time.` : `${bot.name} plays on its own again`);
-    if (data.pickBot && st.thinking) {
-      engine.stop(); st.gen++; st.thinking = false;
-      botTurn();
-    } else if (!data.pickBot && st.picking) {
-      st.picking = false;
-      botTurn();
-    }
-    renderControls();
-    save();
   }
 
   // A hint comes in three steps: the idea, the piece, then the move with its reasons.
@@ -724,8 +698,6 @@ export function renderGame(view) {
   // ---------- buttons ----------
   $('#hintBtn', view).addEventListener('click', hint);
   $('#undoBtn', view).addEventListener('click', undo);
-  $('#pickBtn', view).addEventListener('click', togglePick);
-  $('#flipBtn', view).addEventListener('click', () => { board.flip(); renderBars(); renderEval(); });
   $('#whatIfBtn', view).addEventListener('click', () => (st.sandbox ? closeSandbox() : openSandbox()));
   $('#reviewBtn', view).addEventListener('click', () => { location.hash = '#/review'; });
   $('#resignBtn', view).addEventListener('click', async () => {
