@@ -2,7 +2,7 @@
 import { Chess } from '../vendor/chess.js';
 import { Board, destsFrom, checkSquare } from './board.js';
 import { engine } from './engine.js';
-import { BOTS, botById, botMove } from './bots.js';
+import { BOTS, botById, botMove, thinkTime } from './bots.js';
 import { loadOpenings, lookupOpening, isBook } from './openings.js';
 import {
   explainMove as explainEngineMove, mistakeReason, whatIfMove, compareMoves, hintIdea, runnerUp, shiftWords, reasonList, footnote,
@@ -501,9 +501,10 @@ export function renderGame(view) {
     st.thinking = true; renderBars(); renderControls();
     board.setMovable(null);
     const t0 = Date.now();
-    const uci = await botMove(bot, chess);
+    const info = {};
+    const uci = await botMove(bot, chess, engine, info);
     if (g !== st.gen || st.destroyed) return;
-    const minDelay = 350 + Math.random() * 450;
+    const minDelay = uci ? thinkTime(chess, uci, info) : 0; // a person does not answer every move at the same speed
     const elapsed = Date.now() - t0;
     if (elapsed < minDelay) await sleep(minDelay - elapsed);
     if (g !== st.gen || st.destroyed) return;

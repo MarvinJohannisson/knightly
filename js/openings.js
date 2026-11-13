@@ -27,8 +27,36 @@ const DUBIOUS = [
   'e4 e5 Nf3 f5', 'e4 e5 Nf3 f6', 'e4 e5 Nf3 Qe7', 'e4 e5 Nf3 Qf6',
 ];
 
+const dubious = line => DUBIOUS.some(d => line === d || line.startsWith(d + ' '));
+
+// The same database as a book for the bots: for every position reached by a named line, the moves
+// that named lines continue with, and how many lines go through each. Mainstream moves have
+// hundreds of named lines behind them, oddities one or two.
+let tree = null;
+function buildTree() {
+  tree = new Map();
+  for (const line of Object.keys(db)) {
+    if (dubious(line) || line.includes('#')) continue; // no unsound lines, no lines that walk into mate
+    let prefix = '';
+    for (const move of line.split(' ')) {
+      let next = tree.get(prefix);
+      if (!next) tree.set(prefix, next = {});
+      next[move] = (next[move] || 0) + 1;
+      prefix = prefix ? `${prefix} ${move}` : move;
+    }
+  }
+}
+
+/** Moves that continue a named opening from this move list, most travelled first: [{ san, weight }] */
+export function bookMoves(sans) {
+  if (!db) return [];
+  if (!tree) buildTree();
+  const next = tree.get(sans.join(' '));
+  return next ? Object.entries(next).map(([san, weight]) => ({ san, weight })).sort((a, b) => b.weight - a.weight) : [];
+}
+
 /** Is this exact sequence a named, sound position in the database? */
 export function isBook(sans) {
   const line = sans.join(' ');
-  return !!(db && db[line]) && !DUBIOUS.some(d => line === d || line.startsWith(d + ' '));
+  return !!(db && db[line]) && !dubious(line);
 }

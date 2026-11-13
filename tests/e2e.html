@@ -254,9 +254,9 @@ async function run() {
   await go('#/play'); await go('#/review');
   (await waitFor(() => D().querySelector('#retryBtn'), 30000)).click();
   await sleep(200);
-  await move('c2', 'c3');
+  await move('c4', 'a6'); // a plain blunder: giving up only the e4 pawn is too close a call for the engine
   await waitFor(() => /Not quite|Found it/.test(comment()), 15000);
-  log(/Not quite/.test(comment()), 'leaving e4 hanging is refused: ' + comment().replace(/\s+/g, ' ').slice(0, 80));
+  log(/Not quite/.test(comment()) && /bishop/.test(comment()), 'hanging the bishop is refused: ' + comment().replace(/\s+/g, ' ').slice(0, 80));
   act('Try again');
   await sleep(200);
   await move('d2', 'd3');

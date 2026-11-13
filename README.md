@@ -2,7 +2,7 @@
 
 A mobile-first chess app that runs entirely in the browser (no server, no account, works offline once loaded).
 
-- **Play**: 10 bots from ~400 to full-strength Stockfish, with a coach that grades your moves, three-step hints (the idea, then the piece, then the move with its reasons), takebacks, live opening names and a full game review with accuracy that explains your mistakes and lets you retry them. Mistakes found in the review get a second, deeper look, so the better moves it shows hold up. Turn on **Bot move** during a game to choose the bot's replies yourself and see how a line plays out (such games don't count in your stats). Tap **What if?** on your turn to try moves for both sides on a scratch board, see the engine's answer in plain words and compare the top moves, without touching the game (it counts as a hint).
+- **Play**: 10 bots from ~400 to full-strength Stockfish that play known openings and choose natural-looking moves, with a coach that grades your moves, three-step hints (the idea, then the piece, then the move with its reasons), takebacks, live opening names and a full game review with accuracy that explains your mistakes and lets you retry them. Mistakes found in the review get a second, deeper look, so the better moves it shows hold up. Turn on **Bot move** during a game to choose the bot's replies yourself and see how a line plays out (such games don't count in your stats). Tap **What if?** on your turn to try moves for both sides on a scratch board, see the engine's answer in plain words and compare the top moves, without touching the game (it counts as a hint).
 - **Puzzles**: 4,232 rated puzzles from the Lichess database with your own puzzle rating, practice by theme, hints and explanations.
 - **Learn**: 26 interactive lessons (basics, opening principles and traps, tactics, mating patterns, endgames, thinking habits) and 11 opening courses you can practise move by move.
 
@@ -38,7 +38,7 @@ index.html, css/app.css, sw.js, manifest.webmanifest
 js/app.js        router, home, settings
 js/board.js      touch chessboard (tap or drag)
 js/engine.js     Stockfish web worker wrapper
-js/bots.js       bot personalities
+js/bots.js       bot personalities, opening book use, how they choose moves
 js/play.js       game vs bot + coach
 js/explain.js    the coach's words: why a move is good or bad
 js/review.js     post-game analysis

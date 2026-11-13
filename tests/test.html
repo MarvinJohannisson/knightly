@@ -7,9 +7,9 @@ import { Chess } from '../vendor/chess.js';
 import { LESSONS } from '../js/lessons.js';
 import { COURSES } from '../js/courses.js';
 import { engine } from '../js/engine.js';
-import { BOTS, botMove } from '../js/bots.js';
+import { BOTS, botMove, thinkTime } from '../js/bots.js';
 import { explainMove, mistakeReason, movesInWords, whatIfMove, compareMoves, lineGain, hintIdea, runnerUp, evalWords, shiftWords } from '../js/explain.js';
-import { loadOpenings, isBook } from '../js/openings.js';
+import { loadOpenings, isBook, bookMoves } from '../js/openings.js';
 import { scoreToCp, uciToMove } from '../js/util.js';
 
 const lines = [];
@@ -124,6 +124,32 @@ async function run() {
     try { c.move(uciToMove(u)); legal = true; } catch { }
     log(legal, `bot ${b.id} move ${u} in ${Math.round(performance.now() - t0)}ms`);
   }
+  // ---------- how the bots open ----------
+  await loadOpenings();
+  log(bookMoves([])[0].san === 'e4' && !bookMoves([]).some(m => m.san === 'f3') && bookMoves(['f3']).length === 0, 'the bots\' book starts with 1.e4 and has no unsound lines');
+  const firsts = new Set();
+  for (let k = 0; k < 14; k++) {
+    const how = {};
+    const u = await botMove(BOTS[5], new Chess(), engine, how);
+    firsts.add(how.book ? u : `${u} (not from the book)`);
+  }
+  log([...firsts].every(u => ['e2e4', 'd2d4', 'c2c4'].includes(u)) && firsts.size > 1, 'bots open with a mainstream first move, and not always the same: ' + [...firsts].join(' '));
+  const afterE4 = new Chess();
+  afterE4.move('e4');
+  const replyHow = {};
+  const reply = await botMove(BOTS[0], afterE4, engine, replyHow);
+  log(replyHow.book && ['e7e5', 'c7c5', 'e7e6', 'c7c6'].includes(reply), 'even the weakest bot answers 1.e4 with a known defence: ' + reply);
+  const afterH3 = new Chess();
+  afterH3.move('h3');
+  const oddHow = {};
+  await botMove(BOTS[2], afterH3, engine, oddHow);
+  log(!oddHow.book, 'an offbeat first move gets no book reply');
+  const fenHow = {};
+  await botMove(BOTS[2], new Chess(testFen), engine, fenHow);
+  log(!fenHow.book, 'a position set up from a FEN is not looked up in the book');
+  const quick = thinkTime(new Chess(), 'e2e4', { book: true }), slow = thinkTime(new Chess(testFen), 'g8f6');
+  log(quick >= 400 && quick <= 900 && slow >= 600 && slow <= 3000, `bots answer book moves quickly and think longer otherwise (${Math.round(quick)} and ${Math.round(slow)} ms)`);
+
   // promotion move format from engine
   const pc = new Chess('8/4P1k1/8/8/8/8/8/4K3 w - - 0 1');
   const pr = await engine.analyse(pc.fen(), { depth: 8 });
