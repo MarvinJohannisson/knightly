@@ -27,8 +27,11 @@
   --sq-check: radial-gradient(circle, rgba(255,40,30,.95) 0%, rgba(230,30,30,.55) 45%, rgba(200,0,0,0) 72%);
   --radius: 14px;
   --tab-h: 62px;
+  --bar-h: 72px;
   --top-h: 52px;
-  --board-max: min(100vw - 24px, 560px);
+  /* On a short, wide screen (a laptop) the board shrinks so the coach still fits under it. */
+  --board-max: min(560px, max(300px, 100vh - 330px));
+  --board-max: min(560px, max(300px, 100dvh - 330px));
   color-scheme: dark;
 }
 
@@ -160,7 +163,7 @@ select.select { background: var(--surface-2); border: 1px solid var(--border); b
 @keyframes up { from { transform: translateY(30px); opacity: 0; } }
 
 /* ---------- Board ---------- */
-.board-wrap { position: relative; display: flex; gap: 6px; width: 100%; max-width: 560px; margin: 0 auto; }
+.board-wrap { position: relative; display: flex; gap: 6px; width: 100%; max-width: var(--board-max); margin: 0 auto; }
 .board {
   position: relative; flex: 1; aspect-ratio: 1; border-radius: 6px; overflow: hidden;
   touch-action: none; user-select: none; -webkit-user-select: none;
@@ -211,7 +214,7 @@ body.no-coords .board .coord { display: none; }
 .evalbar .num { position: absolute; left: 0; right: 0; font-size: 8.5px; font-weight: 800; text-align: center; z-index: 1; }
 
 /* ---------- Player bars ---------- */
-.player-bar { display: flex; align-items: center; gap: 10px; padding: 8px 2px; max-width: 560px; margin: 0 auto; }
+.player-bar { display: flex; align-items: center; gap: 10px; padding: 8px 2px; max-width: var(--board-max); margin: 0 auto; }
 .avatar { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; font-size: 22px; background: var(--surface-2); flex: none; }
 .player-bar .name { font-weight: 700; font-size: 15px; }
 .player-bar .rating { color: var(--text-3); font-weight: 600; font-size: 13px; margin-left: 4px; }
@@ -230,7 +233,7 @@ body.no-coords .board .coord { display: none; }
     display: flex; flex-direction: column;
     min-height: calc(100vh - var(--top-h) - env(safe-area-inset-top, 0px));
     min-height: calc(100dvh - var(--top-h) - env(safe-area-inset-top, 0px));
-    padding-bottom: calc(var(--tab-h) + 12px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(var(--bar-h) + 10px + env(safe-area-inset-bottom, 0px));
   }
   .game-view > * { flex: none; width: 100%; }
   .game-view > :first-child { margin-top: auto; }
@@ -244,8 +247,13 @@ body.no-coords .board .coord { display: none; }
 .coach .msg b { font-weight: 700; }
 .coach .why { margin: 6px 0 4px; padding-left: 18px; }
 .coach .why li { margin: 2px 0; line-height: 1.35; }
-.coach .why.compare { padding-left: 20px; }
-.coach .why.compare li { margin: 5px 0; }
+/* The dot in front of each compared move has the colour of its arrow on the board. */
+.coach .compare { list-style: none; margin: 8px 0 2px; padding: 0; }
+.coach .compare li { position: relative; margin: 9px 0; padding-left: 17px; line-height: 1.35; }
+.coach .compare li::before { content: ""; position: absolute; left: 0; top: 5px; width: 10px; height: 10px; border-radius: 50%; background: #888; }
+.coach .compare li:nth-child(1)::before { background: #4fa05e; }
+.coach .compare li:nth-child(2)::before { background: #3c88d8; }
+.coach .compare .tag { font-size: 11px; padding: 0 6px; margin: 0 2px; }
 .coach-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .coach-acts button { border: 0; border-radius: 99px; padding: 6px 12px; background: var(--surface-3); color: var(--text); font: inherit; font-size: 12.5px; font-weight: 650; cursor: pointer; }
 .coach-acts button:active { background: var(--surface-2); }
@@ -354,16 +362,36 @@ body.no-coords .board .coord { display: none; }
 .opening-card .side.w { background: #eee; color: #222; } .opening-card .side.b { background: #111; color: #eee; border: 1px solid #555; }
 
 /* ---------- Review ---------- */
-.review-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.acc { text-align: center; }
-.acc .v { font-size: 30px; font-weight: 850; }
+.review-head { max-width: 560px; margin: 0 auto 10px; padding: 10px 12px; }
+.review-summary { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; margin-top: 6px; }
+.review-more { display: grid; gap: 10px; max-width: 560px; margin: 10px auto 0; }
+.review-more .card { margin: 0; }
+.acc { text-align: center; min-width: 52px; }
+.acc .v { font-size: 22px; font-weight: 850; line-height: 1.15; }
 .acc .who { font-size: 12.5px; color: var(--text-3); font-weight: 650; }
 .counts { display: grid; grid-template-columns: auto 1fr 1fr; gap: 4px 12px; font-size: 14px; align-items: center; }
 .counts .c { text-align: center; font-weight: 750; }
-.graph { width: 100%; height: 70px; border-radius: 10px; background: #403d39; cursor: pointer; display: block; }
+.graph { width: 100%; height: 50px; border-radius: 10px; background: #403d39; cursor: pointer; display: block; }
 .navbar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; max-width: 560px; margin: 10px auto 0; }
 .loading-bar { height: 8px; background: var(--surface-3); border-radius: 99px; overflow: hidden; }
 .loading-bar > div { height: 100%; background: var(--accent); width: 0; transition: width .2s; }
+
+/* ---------- Game and review: the screen's own buttons replace the tabs, so they never move ---------- */
+body[data-route="game"] .tabbar, body[data-route="review"] .tabbar { display: none; }
+.bottom-bar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; margin: 0; max-width: none;
+  padding: 8px max(12px, calc(50vw - 280px)) calc(8px + env(safe-area-inset-bottom, 0px));
+  background: #22201e; border-top: 1px solid #312e2a;
+}
+.navbar.bottom-bar { grid-template-columns: repeat(4, 1fr) 1.9fr; }
+.navbar.bottom-bar .btn { padding: 0 6px; font-size: 14px; }
+
+/* Slim player bars leave more room under the board for the coach. */
+.game-view .player-bar { padding: 5px 2px; }
+.game-view .player-bar .avatar { width: 30px; height: 30px; font-size: 17px; border-radius: 8px; }
+.game-view .player-bar .grow { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.game-view .player-bar .grow > :first-child { white-space: nowrap; }
+.game-view .player-bar .captured { justify-content: flex-end; overflow: hidden; }
 
 .credits p { margin: 6px 0; font-size: 13.5px; color: var(--text-2); }
 

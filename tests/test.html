@@ -8,7 +8,7 @@ import { LESSONS } from '../js/lessons.js';
 import { COURSES } from '../js/courses.js';
 import { engine } from '../js/engine.js';
 import { BOTS, botMove } from '../js/bots.js';
-import { explainMove, mistakeReason, movesInWords, whatIfMove, compareMoves } from '../js/explain.js';
+import { explainMove, mistakeReason, movesInWords, whatIfMove, compareMoves, lineGain, hintIdea, runnerUp, evalWords, shiftWords } from '../js/explain.js';
 import { loadOpenings, isBook } from '../js/openings.js';
 import { scoreToCp, uciToMove } from '../js/util.js';
 
@@ -141,7 +141,7 @@ async function run() {
   log(!/takes back/.test(plain(explainMove(defended, 'c4d5'))), 'behind in material is not a recapture');
   log(/takes back on d5/.test(plain(explainMove(defended, 'c4d5', {}, { captured: 'p', to: 'd5' }))), 'a real recapture says takes back');
   const exchange = { score: { cp: 200 }, lines: [{ pv: ['e2h5', 'f7f6', 'h5e8', 'd6e8'] }] };
-  log(/material \(\+2\)/.test(plain(explainMove('4r3/5k2/3n4/8/8/8/4B3/3K4 w - - 0 1', 'e2h5', exchange))), 'rook for a knight is not two pawns');
+  log(/the exchange \(a rook for a bishop\)/.test(plain(explainMove('4r3/5k2/3n4/8/8/8/4B3/3K4 w - - 0 1', 'e2h5', exchange))), 'a rook for a bishop is called the exchange');
   log(/pawn on f5/.test(plain(explainMove('4k3/8/8/4Pp2/8/8/8/4K3 w - f6 0 1', 'e5f6'))), 'en passant names the captured pawn\'s square');
   const ruy = 'r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3';
   log(mistakeReason(ruy, 'a7a6', { replyUci: 'b5c6' }) === '', 'a fair trade is not called a loss');
@@ -167,10 +167,43 @@ async function run() {
   log(cmp.arrows.length === 3 && (cmp.html.match(/<li>/g) || []).length === 3, 'compare lists three moves: ' + strip(cmp.html).slice(0, 160));
   const forced = '7k/8/8/8/8/8/6q1/7K w - - 0 1';
   log(/only legal move/.test(strip(compareMoves(forced, await engine.analyse(forced, { depth: 8, multipv: 3 }), 'w').html)), 'compare says when there is one legal move');
-  log(/queen on e5 can be taken/.test(mistakeReason('r1b1kbnr/pppp1ppp/2n5/4p2Q/4P3/8/PPPP1PPP/RNB1KBNR w KQkq - 2 3', 'h5e5', { replyUci: 'c6e5' })), 'a hanging piece is called out');
+  log(/queen on e5 where it can be taken/.test(mistakeReason('r1b1kbnr/pppp1ppp/2n5/4p2Q/4P3/8/PPPP1PPP/RNB1KBNR w KQkq - 2 3', 'h5e5', { replyUci: 'c6e5' })), 'a hanging piece is called out');
+
+  // ---------- what the coach says about the best moves ----------
+  const forkFen = 'r3k2r/ppp2ppp/2n5/3N4/8/8/PPP2PPP/R3K2R w KQkq - 0 12';
+  const forkLine = ['d5c7', 'e8d7', 'c7a8', 'h8a8'];
+  const forkSeen = { score: { cp: 400 }, lines: [{ pv: forkLine }] };
+  log(lineGain(forkFen, forkLine, 'w').text === 'a rook and a pawn for a knight', 'a won exchange of pieces is put in words: ' + lineGain(forkFen, forkLine, 'w').text);
+  log(lineGain(forkFen, ['d5c7', 'e8d7'], 'w').gain === 1 && lineGain(forkFen, ['d5f6', 'g7f6'], 'w').gain === -3, 'a capture counts only after the reply');
+  const forkEx = explainMove(forkFen, 'd5c7', forkSeen);
+  log(/fork/.test(plain(forkEx)) && forkEx.tactical, 'a fork is named: ' + plain(forkEx));
+  log(/double attack/.test(strip(hintIdea(forkFen, 'd5c7', forkSeen))), 'the first hint gives the idea, not the move');
+  log(/could have won a rook and a pawn for a knight/.test(strip(mistakeReason(forkFen, 'h2h3', { bestUci: 'd5c7', pvBest: forkLine, pvAfter: ['e8c8'] }))), 'a missed tactic is spelled out');
+  log(/loses a rook: they play Nc2\+, you reply Kd2, then they play Nxa1/.test(strip(mistakeReason('4k3/8/8/8/1n6/8/7P/R3K3 w - - 0 1', 'h2h3', { pvAfter: ['b4c2', 'e1d2', 'c2a1'] }))), 'a loss a few moves deep is spelled out');
+  const twoTakers = 'r1bqkb1r/ppp2ppp/2n5/3np3/2B5/2N2N2/PPPP1PPP/R1BQK2R w KQkq - 0 6';
+  log(mistakeReason(twoTakers, 'c3d5', { bestUci: 'c4d5', replyUci: 'd8d5' }) === '', 'taking the same piece another way is not a missed capture');
+  log(/pins their knight on c6 to the king/.test(plain(explainMove('r2qkbnr/ppp2ppp/2np4/4p3/4P1b1/2N2N2/PPPP1PPP/R1BQKB1R w KQkq - 2 5', 'f1b5'))), 'a pin is named');
+  log(/discovered check/.test(plain(explainMove('4k3/8/8/8/4N3/8/8/4RK2 w - - 0 1', 'e4d6'))), 'a discovered check is named');
+  log(!/attacks/.test(plain(explainMove('4k3/8/8/3b4/8/8/8/3RK3 w - - 0 1', 'd1d2'))), 'an attack that was already there is not news');
+  log(!/open file/.test(plain(explainMove('4k3/8/8/8/8/8/8/3RK3 w - - 0 1', 'd1d4'))), 'a rook staying on its file does not reach an open file');
+  log(/opens a line for your bishop and queen/.test(plain(explainMove(new Chess().fen(), 'e2e4'))), '1.e4 opens lines');
+  const quietC3 = explainMove('r1bqk1nr/pppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4', 'c2c3', { score: { cp: 60 }, lines: [{ pv: ['c2c3', 'g8f6', 'd2d4'] }] });
+  log(/prepares the pawn push d4/.test(plain(quietC3)), 'a preparing move names what it prepares: ' + plain(quietC3));
+  const theirA6 = plain(explainMove(ruy, 'a7a6', {}, null, 'w'));
+  log(/your bishop on b5/.test(theirA6), 'an opponent move is told from your side: ' + theirA6);
+  log(evalWords({ cp: 800 }, 'w') === "you're winning (+8.0)" && evalWords({ cp: 800 }, 'b') === "you're losing (-8.0)", 'a big lead is called winning');
+  log(shiftWords(200, 0) === 'It takes you from a better position to an equal position.' && shiftWords(0, 200) === '', 'a drop is described, a gain is not');
+  log(runnerUp(forced, await engine.analyse(forced, { depth: 8, multipv: 3 })) === 'It is the only legal move.', 'a hint says when there is no choice');
+  const cut = await engine.analyse(open4, { depth: 18, multipv: 3, movetime: 400 });
+  log(cut.lines.length === 3 && new Set(cut.lines.map(l => l.move)).size === 3 && cut.lines.every(l => l.depth === cut.lines[0].depth) && cut.bestmove === cut.lines[0].move,
+    'a search cut short still ranks three different moves at one depth: ' + cut.lines.map(l => `${l.move}@${l.depth}`).join(' '));
+  const backRank = '6k1/5ppp/8/8/8/8/q4PPP/3R2K1 w - - 0 30';
+  const mateCmp = strip(compareMoves(backRank, await engine.analyse(backRank, { depth: 10, multipv: 3 }), 'w').html).replace(/\s+/g, ' ');
+  log(/forces checkmate/.test(mateCmp) && /misses the forced checkmate/.test(mateCmp), 'compare says what the other moves miss: ' + mateCmp.slice(0, 140));
 
   lines.unshift(fails ? `RESULT: ${fails} FAILURES` : 'RESULT: ALL PASSED');
   flush();
+
   await fetch('/__log', { method: 'POST', body: lines.join('\n') });
 }
 run().catch(async e => { lines.unshift('CRASH ' + e.stack); flush(); await fetch('/__log', { method: 'POST', body: lines.join('\n') }); });

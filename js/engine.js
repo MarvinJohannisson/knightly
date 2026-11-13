@@ -59,13 +59,21 @@ export class Engine {
       const pv = tok.slice(tok.indexOf('pv') + 1);
       job.lines[multipv - 1] = { multipv, depth, score, pv, move: pv[0] };
       if (job.onInfo && multipv === 1) job.onInfo(job.lines[0]);
+      // While a depth is being searched, the lines are a mix of this depth and the last one, and
+      // a move can show up twice. Keep the last set in which every line comes from one depth.
+      const set = job.lines.filter(Boolean);
+      if (set.length >= job.whole.length && set.every(l => l.depth === depth) && new Set(set.map(l => l.move)).size === set.length) job.whole = set;
     } else if (line.startsWith('bestmove')) {
       const bm = line.split(' ')[1];
       this.current = null;
+      const lines = job.whole;
+      const best = bm && bm !== '(none)' ? bm : null;
+      // Skill-level bots pick a weaker move on purpose, so only a plain multi-line search is re-ranked.
+      const ranked = job.multipv > 1 && job.skill == null && lines.length > 1;
       job.resolve({
-        bestmove: bm && bm !== '(none)' ? bm : null,
-        lines: job.lines.filter(Boolean),
-        score: job.lines[0] ? job.lines[0].score : null,
+        bestmove: best && ranked ? lines[0].move : best,
+        lines,
+        score: lines[0] ? lines[0].score : null,
         cancelled: job.cancelled,
       });
       this._next();
@@ -92,7 +100,7 @@ export class Engine {
   /** analyse(fen, {depth, movetime, multipv, skill, onInfo}) -> Promise<{bestmove, score, lines, cancelled}> */
   analyse(fen, opts = {}) {
     return this.init().then(() => new Promise(resolve => {
-      this.queue.push({ ...opts, fen, resolve, lines: [], blackToMove: fen.split(' ')[1] === 'b' });
+      this.queue.push({ ...opts, fen, resolve, lines: [], whole: [], blackToMove: fen.split(' ')[1] === 'b' });
       this._next();
     }));
   }

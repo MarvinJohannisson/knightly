@@ -38,6 +38,7 @@ function route() {
   $$('#tabbar a').forEach(a => a.classList.toggle('active', a.dataset.tab === r.tab));
   view.innerHTML = '';
   view.className = r.viewClass ? `view ${r.viewClass}` : 'view';
+  document.body.dataset.route = routes[parts[0]] ? parts[0] : ''; // lets the styles tell the screens apart
   window.scrollTo(0, 0);
   try { cleanup = r.render(view, param) || null; }
   catch (e) { console.error(e); view.innerHTML = `<div class="card">Something went wrong: ${esc(e.message)}</div>`; }

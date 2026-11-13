@@ -4,13 +4,18 @@ import { Board, destsFrom, checkSquare } from './board.js';
 import { engine } from './engine.js';
 import { botById } from './bots.js';
 import { loadOpenings, isBook, lookupOpening } from './openings.js';
-import { explainMove, mistakeReason } from './explain.js';
+import { explainMove, mistakeReason, lineGain, evalWords, shiftWords, reasonList } from './explain.js';
 import {
   $, esc, store, sound, getSettings, uciToMove, winPct, scoreToCp, classify, CLASS_LABEL, moveAccuracy,
 } from './util.js';
 
 const REVIEW_DEPTH = 10;
 const RETRY_DEPTH = 12; // at depth 10, noise can reject sound moves
+// Moves flagged by the quick pass get a second, deeper look with the three best moves, so a
+// "mistake" is not just search noise and the better moves shown are the real ones.
+const DEEP = { depth: 13, multipv: 3, movetime: 1800 };
+const DEEP_AFTER = { depth: 12, movetime: 1200 };
+const BAD = ['inaccuracy', 'mistake', 'blunder'];
 const SYM = { inaccuracy: '?!', mistake: '?', blunder: '??' };
 const MATE_CP = 9000; // scoreToCp puts forced mates beyond this
 
@@ -46,19 +51,20 @@ export function renderReview(view, param) {
   let cur = N;
 
   view.innerHTML = `
-    <div class="card" id="summary"><div class="small muted">Analysing with Stockfish…</div><div class="loading-bar" style="margin-top:8px"><div id="prog"></div></div></div>
-    <div style="height:10px"></div>
+    <div class="card review-head" id="summary"><div class="small muted">Analysing with Stockfish…</div><div class="loading-bar" style="margin-top:8px"><div id="prog"></div></div></div>
     <div class="board-wrap" id="boardWrap"></div>
     <div class="coach" id="coach"><div class="avatar">🎓</div><div class="grow"><div class="msg" id="comment"></div><div class="opening" id="openingName"></div></div></div>
     <div class="puzzle-actions" id="retryActions" hidden></div>
     <div class="moves" id="moves"></div>
-    <div class="navbar">
-      <button class="btn" data-nav="first">⏮</button><button class="btn" data-nav="prev">◀</button>
-      <button class="btn" data-nav="next">▶</button><button class="btn" data-nav="last">⏭</button>
+    <div class="review-more" id="reviewLinks">
+      <div id="retrySlot"></div>
+      <div class="card" id="details" hidden></div>
+      <a class="btn block" href="#/play">New game</a>
     </div>
-    <div id="reviewLinks" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;max-width:560px;margin-inline:auto">
+    <div class="navbar bottom-bar">
+      <button class="btn" data-nav="first" aria-label="First move">⏮</button><button class="btn" data-nav="prev" aria-label="Previous move">◀</button>
+      <button class="btn" data-nav="next" aria-label="Next move">▶</button><button class="btn" data-nav="last" aria-label="Last move">⏭</button>
       <button class="btn" id="nextMistake">Next mistake</button>
-      <a class="btn" href="#/play">New game</a>
     </div>`;
 
   const board = new Board($('#boardWrap', view), { orientation: data.playerColor, onMove: (f, t) => onRetryMove(f, t) });
@@ -89,23 +95,68 @@ export function renderReview(view, param) {
     return true;
   }
 
-  function computeMoves() {
+  function computeMoves(useDeep = true) {
     const { cps, best } = data.review;
     const sans = verbose.map(m => m.san);
     return verbose.map((m, i) => {
       const sign = m.color === 'w' ? 1 : -1;
       const before = sign * cps[i], after = sign * cps[i + 1];
-      const drop = Math.max(0, winPct(before) - winPct(after));
-      let cls = classify(drop, best[i] === m.lan);
+      let drop = Math.max(0, winPct(before) - winPct(after));
+      let bestUci = best[i];
+      const d = useDeep ? data.review.deep?.[i] : null;
+      if (d) {
+        // Both sides of the move were searched again, deeper. A move the engine ranked itself is
+        // also graded by that ranking, whichever is kinder.
+        const pct = s => winPct(sign * scoreToCp(s));
+        const ranked = d.lines.find(l => l.move === m.lan);
+        drop = pct(d.lines[0].score) - pct(d.after.score);
+        if (ranked) drop = Math.min(drop, pct(d.lines[0].score) - pct(ranked.score));
+        drop = Math.max(0, drop);
+        bestUci = d.lines[0].move;
+      }
+      let cls = classify(drop, bestUci === m.lan);
       if (i < 24 && isBook(sans.slice(0, i + 1))) cls = 'book';
-      return { ...m, idx: i, drop, cls, bestUci: best[i], cpAfter: cps[i + 1] };
+      return { ...m, idx: i, drop, cls, bestUci, cpAfter: d ? scoreToCp(d.after.score) : cps[i + 1] };
     });
+  }
+
+  // ---------- second look at the flagged moves ----------
+  const me = data.playerColor;
+  let deepRun = 0, deepLeft = 0;
+
+  function flagged() {
+    return computeMoves(false).filter(m => m.color === me && BAD.includes(m.cls) && m.bestUci);
+  }
+
+  async function deepen() {
+    const run = ++deepRun;
+    data.review.deep = data.review.deep || {};
+    const todo = flagged().filter(m => !data.review.deep[m.idx]);
+    deepLeft = todo.length;
+    for (const m of todo) {
+      const r = await engine.analyse(fens[m.idx], DEEP);
+      if (destroyed || run !== deepRun || r.cancelled) return;
+      const pos = new Chess(fens[m.idx + 1]);
+      const a = pos.isGameOver() ? { score: { cp: 0 }, lines: [], bestmove: null } : await engine.analyse(fens[m.idx + 1], DEEP_AFTER);
+      if (destroyed || run !== deepRun || a.cancelled) return;
+      if (r.lines.length) {
+        data.review.deep[m.idx] = {
+          lines: r.lines.map(l => ({ move: l.move, score: l.score, pv: l.pv.slice(0, 6) })),
+          after: { score: a.score, pv: (a.lines[0]?.pv || []).slice(0, 6) },
+        };
+        saveBack();
+      }
+      deepLeft--;
+      moves = computeMoves();
+      if (!retry) { renderSummary(); renderPos(); }
+    }
+    deepLeft = 0;
+    if (!retry) renderSummary();
   }
 
   let moves = null;
 
   function renderSummary() {
-    const me = data.playerColor;
     const side = c => moves.filter(m => m.color === c);
     const acc = c => { const s = side(c); return s.length ? Math.round(s.reduce((a, m) => a + moveAccuracy(m.drop), 0) / s.length) : 0; };
     const cnt = (c, k) => side(c).filter(m => m.cls === k).length;
@@ -117,16 +168,21 @@ export function renderReview(view, param) {
     const list = retryList();
     const last = data.review.retried;
     $('#summary', view).innerHTML = `
-      <div class="small muted center" style="margin-bottom:8px">${esc(resultTxt)} · vs ${esc(bot.name)} (~${bot.rating})</div>
+      <div class="small muted center">${esc(resultTxt)} · vs ${esc(bot.name)} (~${bot.rating})</div>
       <div class="review-summary">
-        <div class="acc"><div class="v">${acc(me)}%</div><div class="who">Your accuracy</div></div>
+        <div class="acc"><div class="v">${acc(me)}%</div><div class="who">You</div></div>
+        <svg class="graph" id="graph" viewBox="0 0 ${Math.max(N, 1)} 100" preserveAspectRatio="none" role="img" aria-label="Who was better, move by move"></svg>
         <div class="acc"><div class="v">${acc(them)}%</div><div class="who">${esc(bot.name)}</div></div>
-      </div>
-      <div style="margin:12px 0 4px"><svg class="graph" id="graph" viewBox="0 0 ${Math.max(N, 1)} 100" preserveAspectRatio="none"></svg></div>
-      <div class="counts" style="margin-top:10px"><span></span><span class="c small muted">You</span><span class="c small muted">${esc(bot.name)}</span>${rows}</div>
-      ${list.length ? `<button class="btn primary block" id="retryBtn" style="margin-top:12px">Learn from your mistakes (${list.length})</button>` : ''}
-      ${list.length && last ? `<div class="small muted center" style="margin-top:6px">Last time you found ${last.found} of ${last.total}</div>` : ''}`;
-    if (list.length) $('#retryBtn', view).addEventListener('click', () => startRetry(list));
+      </div>`;
+    // The retry list waits for the second look, so it only holds moves that really were mistakes.
+    $('#retrySlot', view).innerHTML = deepLeft ? `<div class="small muted center">Double-checking your mistakes… ${deepLeft} to go</div>`
+      : list.length ? `<button class="btn primary block" id="retryBtn">Learn from your mistakes (${list.length})</button>
+        ${last ? `<div class="small muted center" style="margin-top:6px">Last time you found ${last.found} of ${last.total}</div>` : ''}` : '';
+    const details = $('#details', view);
+    details.hidden = false;
+    details.innerHTML = `<div class="counts"><span></span><span class="c small muted">You</span><span class="c small muted">${esc(bot.name)}</span>${rows}</div>`;
+    const retryBtn = $('#retryBtn', view);
+    if (retryBtn) retryBtn.addEventListener('click', () => startRetry(retryList()));
     drawGraph();
   }
 
@@ -160,25 +216,33 @@ export function renderReview(view, param) {
     if (c) el.scrollLeft = c.offsetLeft - el.clientWidth / 2;
   }
 
-  function fmtCp(cp) {
-    if (Math.abs(cp) >= 9000) return cp > 0 ? 'White mates' : 'Black mates';
-    const v = cp / 100;
-    return (v > 0 ? '+' : '') + v.toFixed(1);
-  }
+  const tryMove = (fen, uci) => { try { return new Chess(fen).move(uciToMove(uci)); } catch { return null; } };
+  const arrowOf = (m, color) => ({ from: m.from, to: m.to, color });
 
   function analysisAt(i) {
     const l = data.review.lines[i];
     return l ? { score: l.score, lines: [{ pv: l.pv }] } : {};
   }
 
+  /** The engine's line starting with the best move in `mm`'s position, and its line after `mm` was played. */
+  function linesFor(mm) {
+    const d = data.review.deep?.[mm.idx];
+    return {
+      best: d ? { score: d.lines[0].score, lines: [d.lines[0]] } : analysisAt(mm.idx),
+      pvAfter: d ? d.after.pv : data.review.lines[mm.idx + 1]?.pv || [],
+      others: d ? d.lines.slice(1) : [],
+    };
+  }
+
   /** Why `uci`, played instead of the best move in `mm`'s position, goes wrong. cpAfter is White's POV. */
-  function reasonFor(mm, uci, cpAfter, replyUci) {
+  function reasonFor(mm, uci, cpAfter, pvAfter) {
     const sign = mm.color === 'w' ? 1 : -1;
+    const cpBefore = data.review.cps[mm.idx];
     return mistakeReason(mm.before, uci, {
-      bestUci: mm.bestUci, replyUci,
+      bestUci: mm.bestUci, pvBest: linesFor(mm).best.lines?.[0]?.pv, pvAfter,
       mateAgainst: sign * cpAfter <= -MATE_CP,
-      hadMate: sign * data.review.cps[mm.idx] >= MATE_CP,
-    });
+      hadMate: sign * cpBefore >= MATE_CP,
+    }) || shiftWords(sign * cpBefore, sign * cpAfter);
   }
 
   /** Reasons a move is strong, as a list for the coach box. */
@@ -186,31 +250,59 @@ export function renderReview(view, param) {
     let ex = null;
     try { ex = explainMove(fens[i], uci, analysis, verbose[i - 1]); } catch (e) { console.error('explain failed', e); }
     if (!ex) return '';
-    return `<ul class="why">${ex.reasons.map(r => `<li>${r}</li>`).join('')}</ul>${ex.line ? `<div class="small muted">Likely next: ${ex.line}</div>` : ''}`;
+    return `${reasonList(ex.reasons)}${ex.line ? `<div class="small muted">Likely next: ${ex.line}</div>` : ''}`;
+  }
+
+  /** How the position after ply `ply` stands for the player, in words. */
+  function standing(ply) {
+    if (new Chess(fens[ply]).isGameOver()) return '';
+    const words = evalWords(data.review.deep?.[ply - 1]?.after.score || data.review.lines[ply]?.score, me);
+    return words ? `<div class="small muted">Now ${words}.</div>` : '';
   }
 
   function renderPos() {
     const m = verbose[cur - 1];
     board.setPosition(fens[cur], { lastMove: m ? [m.from, m.to] : null, check: checkSquare(new Chess(fens[cur])) });
     const arrows = [];
-    let comment = cur === 0 ? 'Starting position. Use the arrows to step through the game.' : '';
+    let comment = cur === 0 ? 'Starting position. Step through the game with the arrows below.' : '';
     if (moves && cur > 0) {
       const mm = moves[cur - 1];
       const moveNo = `${Math.ceil(cur / 2)}.${mm.color === 'b' ? '..' : ''}`;
-      const mine = mm.color === data.playerColor;
-      const who = mine ? 'You' : bot.name;
-      let bestSan = '';
-      if (mm.bestUci && mm.bestUci !== mm.lan) {
-        try { const b = new Chess(fens[cur - 1]).move(uciToMove(mm.bestUci)); bestSan = b.san; arrows.push({ from: b.from, to: b.to, color: 'green' }); } catch { }
-      }
-      const label = CLASS_LABEL[mm.cls];
-      comment = `<span class="tag ${mm.cls}">${label}</span> ${esc(who)} played <b>${moveNo} ${esc(mm.san)}</b>.`;
-      const bad = ['inaccuracy', 'mistake', 'blunder'].includes(mm.cls) && bestSan;
-      if (bad && mine) comment += ` ${reasonFor(mm, mm.lan, mm.cpAfter, data.review.best[cur])}`;
-      if (bad) comment += ` Better was <b>${esc(bestSan)}</b> (green arrow).`;
-      else if (mm.cls === 'good' && bestSan) comment += ` <span class="muted">Engine preferred ${esc(bestSan)}.</span>`;
-      comment += ` <span class="muted small">Eval: ${fmtCp(mm.cpAfter)}</span>`;
-      if (bad && mine) comment += whyHtml(cur - 1, mm.bestUci);
+      const mine = mm.color === me;
+      const sign = mm.color === 'w' ? 1 : -1;
+      const best = mm.bestUci && mm.bestUci !== mm.lan ? tryMove(fens[cur - 1], mm.bestUci) : null;
+      const bad = BAD.includes(mm.cls) && best;
+      const { best: bestLine, pvAfter, others } = linesFor(mm);
+      if (best) arrows.push(arrowOf(best, 'green'));
+      comment = `<span class="tag ${mm.cls}">${CLASS_LABEL[mm.cls]}</span> ${esc(mine ? 'You' : bot.name)} played <b>${moveNo} ${esc(mm.san)}</b>.`;
+      if (bad && mine) {
+        const reason = reasonFor(mm, mm.lan, mm.cpAfter, pvAfter);
+        const reply = tryMove(fens[cur], pvAfter[0]); // their best answer to the move played
+        if (reply) arrows.push(arrowOf(reply, 'red'));
+        comment += ` ${reason}`;
+        // When only the drop in the position is known, at least show how they punish it.
+        if (reply && (!reason || reason.startsWith('It takes you'))) comment += ` Their best answer is <b>${esc(reply.san)}</b> (red arrow).`;
+        comment += ` Better was <b>${esc(best.san)}</b> (green arrow).${whyHtml(cur - 1, mm.bestUci, bestLine)}`;
+        // Other moves the engine rated close to its first choice.
+        const pct = s => winPct(sign * scoreToCp(s));
+        const close = others.map(l => ({ l, mv: tryMove(fens[cur - 1], l.move) }))
+          .filter(x => x.mv && x.l.move !== mm.lan && pct(bestLine.score) - pct(x.l.score) < 7);
+        if (close.length) comment += `<div class="small muted">Also good: ${close.map(x => `<b>${esc(x.mv.san)}</b>`).join(', ')}.</div>`;
+        if (deepLeft && !data.review.deep?.[mm.idx]) comment += '<div class="small muted">Double-checking this move…</div>';
+      } else if (bad) {
+        comment += ` Better was <b>${esc(best.san)}</b> (green arrow).`;
+        // What the bot's slip offered the player.
+        const chance = tryMove(fens[cur], pvAfter[0]);
+        const score = data.review.lines[cur]?.score;
+        if (chance && score?.mate != null && Math.sign(score.mate) === -sign) {
+          comment += ` It let you force checkmate, starting with <b>${esc(chance.san)}</b> (blue arrow).`;
+          arrows.push(arrowOf(chance, 'blue'));
+        } else if (chance && lineGain(fens[cur], pvAfter, me, 4).gain >= 1) {
+          comment += ` It gave you the chance to win ${lineGain(fens[cur], pvAfter, me, 4).text} with <b>${esc(chance.san)}</b> (blue arrow).`;
+          arrows.push(arrowOf(chance, 'blue'));
+        }
+      } else if (mm.cls === 'good' && best) comment += ` <span class="muted">The engine preferred ${esc(best.san)}.</span>`;
+      comment += standing(cur);
       board.setMarks({ [mm.to]: mm.cls === 'blunder' || mm.cls === 'mistake' ? 'wrong' : mm.cls === 'best' ? 'good' : undefined });
     } else board.setMarks({});
     board.setArrows(arrows);
@@ -235,7 +327,7 @@ export function renderReview(view, param) {
   let retry = null; // { list, i, found, missed, tries, hinted, token }
 
   function retryList() {
-    const mine = moves.filter(m => m.color === data.playerColor && m.bestUci);
+    const mine = moves.filter(m => m.color === me && m.bestUci && m.bestUci !== m.lan);
     const big = mine.filter(m => m.cls === 'mistake' || m.cls === 'blunder');
     return big.length ? big : mine.filter(m => m.cls === 'inaccuracy');
   }
@@ -314,9 +406,9 @@ export function renderReview(view, param) {
     board.setPosition(c.fen(), { lastMove: [from, to], check: checkSquare(c) });
     board.setMovable(null);
 
-    if (mv.lan === m.bestUci) { solveRetry(m, mv, analysisAt(m.idx), true); return; }
+    if (mv.lan === m.bestUci) { solveRetry(m, mv, linesFor(m).best, true); return; }
     if (c.isCheckmate()) { solveRetry(m, mv, {}, true); return; }
-    if (mv.lan === m.lan) { failRetry(m, mv, m.cpAfter, data.review.best[m.idx + 1], 'That is the move from the game.'); return; }
+    if (mv.lan === m.lan) { failRetry(m, mv, m.cpAfter, linesFor(m).pvAfter, 'That is the move from the game.'); return; }
 
     $('#comment', view).textContent = 'Checking your move…';
     setRetryActions([]);
@@ -331,7 +423,7 @@ export function renderReview(view, param) {
       solveRetry(m, mv, { score: r.score, lines: [{ pv: [mv.lan, ...(r.lines[0]?.pv || [])] }] }, false);
     } else {
       const improved = drop < (bestWin - winPct(sign * m.cpAfter)) / 2;
-      failRetry(m, mv, cpAfter, r.bestmove, improved ? 'Better than the game move, but there is something stronger.' : '');
+      failRetry(m, mv, cpAfter, r.lines[0]?.pv || [], improved ? 'Better than the game move, but there is something stronger.' : '');
     }
   }
 
@@ -362,13 +454,13 @@ export function renderReview(view, param) {
     setRetryActions([{ label: 'Next', cls: 'primary', fn: nextRetry }]);
   }
 
-  function failRetry(m, mv, cpAfter, replyUci, lead) {
+  function failRetry(m, mv, cpAfter, pvAfter, lead) {
     retry.tries++;
     if (retry.tries >= 2) retry.hinted = true;
     let reply = null;
-    try { reply = new Chess(mv.after).move(uciToMove(replyUci)); } catch { }
+    try { reply = new Chess(mv.after).move(uciToMove(pvAfter[0])); } catch { }
     board.setArrows(reply ? [{ from: reply.from, to: reply.to, color: 'red' }] : []);
-    const reason = reasonFor(m, mv.lan, cpAfter, replyUci) || (reply ? `They can answer <b>${esc(reply.san)}</b> (red arrow).` : '');
+    const reason = reasonFor(m, mv.lan, cpAfter, pvAfter) || (reply ? `They can answer <b>${esc(reply.san)}</b> (red arrow).` : '');
     $('#comment', view).innerHTML = `<span class="tag mistake">Not quite</span> ${lead} ${reason}`;
     setRetryActions([
       { label: 'Try again', cls: 'primary', fn: showRetry },
@@ -386,8 +478,9 @@ export function renderReview(view, param) {
     board.setPosition(fens[m.idx], { check: checkSquare(new Chess(fens[m.idx])), animate: false });
     board.setMovable(null);
     board.setArrows([{ from: best.from, to: best.to, color: 'green' }]);
-    $('#comment', view).innerHTML = `The best move was <b>${esc(best.san)}</b>. ${reasonFor(m, m.lan, m.cpAfter, data.review.best[m.idx + 1])}
-      ${whyHtml(m.idx, m.bestUci)}`;
+    const { best: bestLine, pvAfter } = linesFor(m);
+    $('#comment', view).innerHTML = `The best move was <b>${esc(best.san)}</b>.${whyHtml(m.idx, m.bestUci, bestLine)}
+      <div class="small muted">You played <b>${esc(m.san)}</b>. ${reasonFor(m, m.lan, m.cpAfter, pvAfter)}</div>`;
     setRetryActions([{ label: 'Next', cls: 'primary', fn: nextRetry }]);
   }
 
@@ -428,10 +521,20 @@ export function renderReview(view, param) {
   analyse().then(ok => {
     if (!ok || destroyed) return;
     moves = computeMoves();
+    deepLeft = flagged().filter(m => !data.review.deep?.[m.idx]).length;
     renderSummary();
     cur = 0;
     renderPos();
+    deepen();
   });
 
-  return () => { destroyed = true; engine.stop(); };
+  // Arrow keys step through the game on a computer.
+  const onKey = e => {
+    if (retry || e.target.closest('input, select, textarea')) return;
+    const to = { ArrowLeft: cur - 1, ArrowRight: cur + 1, Home: 0, End: N }[e.key];
+    if (to != null) { e.preventDefault(); go(to); }
+  };
+  window.addEventListener('keydown', onKey);
+
+  return () => { destroyed = true; engine.stop(); window.removeEventListener('keydown', onKey); };
 }

@@ -59,8 +59,16 @@ async function run() {
   log(/tag/.test(coach2) || coach2.length > 0, 'coach classification shown: ' + D().querySelector('#coachMsg').textContent.slice(0, 90));
   // hint
   D().querySelector('#hintBtn').click();
-  await waitFor(() => D().querySelector('.sq.hint'), 15000);
-  log(!!D().querySelector('.sq.hint'), 'hint highlights a piece');
+  await waitFor(() => /Tap Hint again/.test(D().querySelector('#coachMsg').textContent), 15000);
+  log(!D().querySelector('.sq.hint') && !D().querySelector('.board .arrows line'), 'first hint gives an idea only: ' + D().querySelector('#coachMsg').textContent.slice(0, 70));
+  D().querySelector('#hintBtn').click();
+  await sleep(200);
+  log(!!D().querySelector('.sq.hint') && !D().querySelector('.board .arrows line'), 'second hint highlights a piece');
+  D().querySelector('#hintBtn').click();
+  await sleep(200);
+  log(!!D().querySelector('.board .arrows line') && !!D().querySelector('#coachMsg .why li'), 'third hint shows the move with reasons');
+  log(read('game').hints === 1, 'three taps on one position count as one hint');
+
   // what if: moves for both sides stay off the game
   const coachText = () => D().querySelector('#coachMsg').textContent;
   const wiGame = JSON.stringify(read('game').moves);
@@ -186,7 +194,7 @@ async function run() {
   // ---------- review of a finished game (fool's mate) ----------
   store('game', { botId: 'theo', playerColor: 'w', moves: ['f2f3', 'e7e5', 'g2g4', 'd8h4'], evals: {}, marks: {}, result: { winner: 'b', reason: 'checkmate' }, recorded: true, hints: 0, takebacks: 0, started: 1 });
   await go('#/review');
-  const sum = await waitFor(() => /accuracy/i.test(D().querySelector('#summary').textContent) && D().querySelector('#summary').textContent, 30000);
+  const sum = await waitFor(() => D().querySelector('#graph') && D().querySelector('#summary').textContent + D().querySelector('#details').textContent, 30000);
   log(!!sum, 'review summary: ' + (sum || '').replace(/\s+/g, ' ').slice(0, 120));
   log(/Blunder/.test(sum || ''), 'review flags blunders');
   D().querySelector('#nextMistake').click(); // 1.f3 is graded too now
@@ -200,7 +208,7 @@ async function run() {
   // ---------- learn from your mistakes ----------
   const comment = () => D().querySelector('#comment').textContent;
   const act = label => [...D().querySelectorAll('#retryActions button')].find(b => b.textContent.includes(label)).click();
-  D().querySelector('#retryBtn').click();
+  (await waitFor(() => D().querySelector('#retryBtn'), 30000)).click();
   await sleep(200);
   log(D().querySelector('#summary').hidden && /Find a better move/.test(comment()), 'retry mode starts: ' + comment().replace(/\s+/g, ' ').slice(0, 60));
   for (let k = 0; k < 6 && !/You found/.test(comment()); k++) {
@@ -212,7 +220,8 @@ async function run() {
       act('Hint');
       await sleep(200);
       log(!!D().querySelector('.sq.hint'), 'retry hint highlights a piece');
-      const b = read('game').review.best[2];
+      const rv = read('game').review;
+      const b = rv.deep?.[2]?.lines[0].move || rv.best[2];
       await move(b.slice(0, 2), b.slice(2, 4));
       log(/Found it/.test(comment()) && !!D().querySelector('#comment .why li'), 'best move is accepted and explained: ' + comment().replace(/\s+/g, ' ').slice(0, 80));
       act('Next');
@@ -222,7 +231,7 @@ async function run() {
   log(/You found/.test(comment()), 'retry ends with a score: ' + comment().replace(/\s+/g, ' ').slice(0, 60));
   act('Back to review');
   await sleep(300);
-  log(!D().querySelector('#summary').hidden && /Last time you found/.test(D().querySelector('#summary').textContent), 'review returns and remembers the score');
+  log(!D().querySelector('#summary').hidden && /Last time you found/.test(D().querySelector('#retrySlot').textContent), 'review returns and remembers the score');
 
   store('game', { botId: 'theo', playerColor: 'w', moves: ['e2e4', 'e7e5', 'd1h5', 'b8c6', 'h5f7', 'e8f7'], evals: {}, marks: {}, result: { winner: 'b', reason: 'resignation' }, recorded: true, hints: 0, takebacks: 0, started: 4 });
   await go('#/play'); await go('#/review');

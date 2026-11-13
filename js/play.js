@@ -4,13 +4,18 @@ import { Board, destsFrom, checkSquare } from './board.js';
 import { engine } from './engine.js';
 import { BOTS, botById, botMove } from './bots.js';
 import { loadOpenings, lookupOpening, isBook } from './openings.js';
-import { explainMove as explainEngineMove, mistakeReason, whatIfMove, compareMoves } from './explain.js';
+import {
+  explainMove as explainEngineMove, mistakeReason, whatIfMove, compareMoves, hintIdea, runnerUp, shiftWords, reasonList, footnote,
+} from './explain.js';
 import {
   $, el, esc, store, sound, modal, confirmBox, toast, sleep, getSettings, setSetting,
   pieceImg, PIECE_VALUE, uciToMove, winPct, scoreToCp, fmtScore, classify, CLASS_LABEL,
 } from './util.js';
 
 const COACH_DEPTH = 11;
+// Hints and comparisons look deeper and keep the three best moves. The time cap is for slow phones.
+const HELP = { depth: 14, multipv: 3, movetime: 2500 };
+const WHATIF = { depth: 13, movetime: 2000 };
 const PIECE_NAMES = { p: 'pawn', n: 'knight', b: 'bishop', r: 'rook', q: 'queen', k: 'king' };
 
 // ======================= Setup screen =======================
@@ -111,10 +116,14 @@ export function renderGame(view) {
   data.picked = data.picked || {}; // plies where the player chose the bot's move
 
   const st = {
-    gen: 0, thinking: false, picking: false, turnAnalysis: null, hintStep: 0, hintMove: null,
+    gen: 0, thinking: false, picking: false, turnAnalysis: null,
+    hint: null,    // { uci, analysis, step } for the position on the board
+    help: null,    // the deeper analysis behind hints and comparisons, one per position
+    helped: false, // has this position already been counted as a hint?
+    why: null,     // the better move the coach just pointed out, for "Why?"
     coachHtml: '', coachTag: '', destroyed: false,
     sandbox: null, // the "What if?" board: a scratch position that never touches the game
-    asking: false, whatIfUsed: false,
+    asking: false,
   };
   const pos = () => (st.sandbox ? st.sandbox.chess : chess);
 
@@ -124,7 +133,7 @@ export function renderGame(view) {
     <div class="player-bar" id="meBar"></div>
     <div class="coach" id="coach"><div class="avatar">🎓</div><div class="grow"><div class="msg" id="coachMsg"></div><div class="opening" id="openingName"></div></div></div>
     <div class="moves" id="moves" ${settings.moveList ? '' : 'hidden'}></div>
-    <div class="controls">
+    <div class="controls bottom-bar">
       <button class="ctl" id="hintBtn"><svg viewBox="0 0 24 24"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.4 1 1.1 1 1.8V16h5v-.3c0-.7.4-1.4 1-1.8A6 6 0 0 0 12 3z"/></svg>Hint</button>
       <button class="ctl" id="undoBtn"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg><span>Takeback</span></button>
       <button class="ctl" id="pickBtn" title="Choose the bot's moves yourself" aria-pressed="false"><svg viewBox="0 0 24 24"><rect x="5" y="8" width="14" height="11" rx="3"/><path d="M12 8V4M10 13h.01M14 13h.01M9 19v2M15 19v2"/></svg>Bot move</button>
@@ -231,7 +240,7 @@ export function renderGame(view) {
   function setCoach(html) {
     st.coachHtml = html;
     $('#coachMsg', view).innerHTML = html;
-    const acts = { takeback: undo, whatif: openSandbox, compare: compareTop };
+    const acts = { takeback: undo, whatif: openSandbox, compare: compareTop, why: whyBest };
     for (const a of view.querySelectorAll('#coachMsg [data-act]')) a.addEventListener('click', () => acts[a.dataset.act]());
   }
 
@@ -355,7 +364,7 @@ export function renderGame(view) {
   }
 
   function startPlayerTurn() {
-    st.hintStep = 0; st.hintMove = null; st.whatIfUsed = false;
+    st.hint = null; st.help = null; st.helped = false;
     board.setMarks({});
     renderBoard(lastMoveSquares(), false);
     renderControls();
@@ -403,7 +412,9 @@ export function renderGame(view) {
     if (s.coach || s.evalBar) {
       const before = st.turnAnalysis ? await st.turnAnalysis : null;
       if (g !== st.gen) return;
-      const after = await engine.analyse(chess.fen(), { depth: COACH_DEPTH });
+      // After a hint or comparison the position was searched deeper, so the reply gets a deeper look too.
+      const deep = (before?.lines?.[0]?.depth || 0) > COACH_DEPTH + 1;
+      const after = await engine.analyse(chess.fen(), deep ? WHATIF : { depth: COACH_DEPTH });
       if (g !== st.gen || after.cancelled) return;
       if (after.score) data.evals[ply] = after.score;
       renderEval();
@@ -421,39 +432,67 @@ export function renderGame(view) {
   }
 
   function explainMove(move, fenBefore, before, after, ply) {
-    const me = move.color;
-    const sign = me === 'w' ? 1 : -1;
-    const cpBefore = sign * scoreToCp(before.score);
-    const cpAfter = sign * scoreToCp(after.score);
-    const drop = winPct(cpBefore) - winPct(cpAfter);
+    const sign = move.color === 'w' ? 1 : -1;
+    const pct = s => winPct(sign * scoreToCp(s));
+    const mates = s => s.mate != null && Math.sign(s.mate) === sign;
+    let drop = pct(before.score) - pct(after.score);
+    // A move the engine ranked itself is graded by that ranking too, so the verdict agrees with
+    // what a hint or a comparison showed for this position.
+    const ranked = before.lines.find(l => l.move === move.lan);
+    if (ranked) drop = Math.min(drop, pct(before.lines[0].score) - pct(ranked.score));
     const bestUci = before.bestmove;
     const isBest = bestUci && bestUci === move.lan;
-    const tmp = new Chess(fenBefore);
-    let bestSan = '';
     let bestMove = null;
-    try { bestMove = tmp.move(uciToMove(bestUci)); bestSan = bestMove.san; } catch { }
+    try { bestMove = new Chess(fenBefore).move(uciToMove(bestUci)); } catch { }
+    const bestSan = bestMove ? `<b>${esc(bestMove.san)}</b>` : 'Another move';
+    const prev = chess.history({ verbose: true }).at(-2) || null;
 
     const cls = classify(drop, isBest);
-    let label = CLASS_LABEL[cls], text;
-    if (cls === 'best') { label = isBest ? 'Best' : 'Excellent'; text = isBest ? pick(['The top engine move!', 'Exactly what the engine wanted.', 'Spot on.']) : 'As good as the top move.'; }
-    else if (cls === 'good') text = bestSan ? `Solid. <b>${esc(bestSan)}</b> was slightly better.` : 'Solid move.';
-    else if (cls === 'inaccuracy') text = `<b>${esc(bestSan)}</b> was better.`;
-    else if (cls === 'mistake') text = `<b>${esc(bestSan)}</b> was much better.`;
-    else text = `<b>${esc(bestSan)}</b> was the move.`;
-
-    // Reasons for bad moves
-    if (cls === 'inaccuracy' || cls === 'mistake' || cls === 'blunder') {
-      text += ' ' + mistakeReason(fenBefore, move.lan, {
-        bestUci, replyUci: after.bestmove,
-        mateAgainst: after.score.mate != null && Math.sign(after.score.mate) === -sign,
-        hadMate: before.score.mate != null && Math.sign(before.score.mate) === sign,
-      });
-      text += ` <a href="javascript:void 0" data-act="takeback">Take back</a>`;
-      if (bestMove) board.setArrows([{ from: bestMove.from, to: bestMove.to, color: 'green' }]);
+    const bad = cls === 'inaccuracy' || cls === 'mistake' || cls === 'blunder';
+    let label = CLASS_LABEL[cls], text, acts = '';
+    st.why = null;
+    if (cls === 'best') {
+      label = isBest ? 'Best' : 'Excellent';
+      text = isBest ? pick(['The top engine move!', 'Exactly what the engine wanted.', 'Spot on.']) : 'As good as the top move.';
+      // Name the idea behind a tactic, so a good find is also understood.
+      if (isBest) { try { const ex = explainEngineMove(fenBefore, move.lan, before, prev); if (ex.tactical) text = ex.reasons[0]; } catch { } }
+    } else if (cls === 'good') text = `Solid. ${bestSan} was slightly better.`;
+    if (!bad && !isBest && bestMove && mates(before.score) && !mates(after.score)) {
+      text = `Still winning, but ${bestSan} was a forced checkmate in ${Math.abs(before.score.mate)}.`;
     }
-    data.marks[ply] = cls === 'best' || cls === 'good' ? null : cls;
+
+    if (bad) {
+      const why = mistakeReason(fenBefore, move.lan, {
+        bestUci, replyUci: after.bestmove, pvBest: before.lines[0]?.pv, pvAfter: after.lines[0]?.pv,
+        mateAgainst: after.score.mate != null && Math.sign(after.score.mate) === -sign,
+        hadMate: mates(before.score),
+      }) || shiftWords(sign * scoreToCp(before.score), sign * scoreToCp(after.score));
+      // First what the played move does wrong, under its own name, then the better move.
+      const said = why.replace(/^It /, `<b>${esc(move.san)}</b> `);
+      const better = cls === 'inaccuracy' ? 'was better' : cls === 'mistake' ? 'was much better' : 'was the move';
+      let idea = '';
+      if (!why && bestMove) { try { const ex = explainEngineMove(fenBefore, bestUci, before, prev); if (!ex.generic) idea = ` ${ex.reasons[0]}`; } catch { } }
+      text = bestMove && said.includes(bestSan) ? said : `${said} ${bestSan} ${better}.${idea}`.trim();
+      acts = `<div class="coach-acts"><button data-act="takeback">Take back</button>${bestMove ? `<button data-act="why">Why ${esc(bestMove.san)}?</button>` : ''}</div>`;
+      if (bestMove) {
+        board.setArrows([{ from: bestMove.from, to: bestMove.to, color: 'green' }]);
+        st.why = { fen: fenBefore, uci: bestUci, analysis: before, prev };
+      }
+    }
+    data.marks[ply] = bad ? cls : null;
     renderMoves();
-    setCoach(`<span class="tag ${cls}">${label}</span> ${text}`);
+    setCoach(`<span class="tag ${cls}">${label}</span> ${text}${acts}`);
+  }
+
+  /** What the better move would have done, after the coach pointed one out. */
+  function whyBest() {
+    const w = st.why;
+    if (!w) return;
+    let ex = null;
+    try { ex = explainEngineMove(w.fen, w.uci, w.analysis, w.prev); } catch (e) { console.error('explain failed', e); }
+    if (!ex) return;
+    setCoach(`<b>${esc(ex.san)}</b> was the better move (green arrow).${reasonList(ex.reasons)}${footnote(ex.line, '')}
+      <div class="coach-acts"><button data-act="takeback">Take back</button></div>`);
   }
 
   async function botTurn() {
@@ -516,34 +555,51 @@ export function renderGame(view) {
     save();
   }
 
+  // A hint comes in three steps: the idea, the piece, then the move with its reasons.
   async function hint() {
-    if (chess.turn() !== data.playerColor || data.result) return;
-    const g = st.gen;
-    if (!st.hintMove) {
+    if (chess.turn() !== data.playerColor || data.result || st.asking || st.thinking) return;
+    const g = st.gen, fen = chess.fen();
+    if (!st.hint) {
       setCoach('Thinking about a hint…');
       st.asking = true;
-      const res = await positionAnalysis().finally(() => { st.asking = false; });
-      if (g !== st.gen || !res.bestmove) return;
-      st.hintMove = uciToMove(res.bestmove);
-      st.hintUci = res.bestmove;
-      st.hintAnalysis = res;
+      const res = await helpAnalysis().finally(() => { st.asking = false; });
+      if (g !== st.gen || chess.fen() !== fen) return;
+      if (res.cancelled || !res.bestmove) { setCoach('No hint is ready yet. Tap Hint to try again.'); return; }
+      st.hint = { uci: res.bestmove, analysis: res, step: 0 };
     }
-    const m = st.hintMove;
-    const p = chess.get(m.from);
-    data.hints++;
-    if (st.hintStep === 0) {
-      board.setMarks({ [m.from]: 'hint' });
-      setCoach(`💡 Look at your <b>${PIECE_NAMES[p.type]}</b> on ${m.from}. What is the best square for it? <span class="muted">(Tap Hint again to see the move.)</span>`);
-      st.hintStep = 1;
-    } else {
+    countHelp();
+    const h = st.hint, m = uciToMove(h.uci);
+    const prev = chess.history({ verbose: true }).at(-1) || null;
+    try {
+      if (h.step === 0) {
+        setCoach(`💡 ${hintIdea(fen, h.uci, h.analysis, prev)} <span class="muted">(Tap Hint again for more.)</span>`);
+      } else if (h.step === 1) {
+        board.setMarks({ [m.from]: 'hint' });
+        setCoach(`💡 The move to find is with your <b>${PIECE_NAMES[chess.get(m.from).type]}</b> on ${m.from}. <span class="muted">(Tap Hint again to see it.)</span>`);
+      } else {
+        board.setMarks({ [m.from]: 'hint' });
+        board.setArrows([{ from: m.from, to: m.to, color: 'blue' }]);
+        const ex = explainEngineMove(fen, h.uci, h.analysis, prev);
+        const alt = runnerUp(fen, h.analysis);
+        setCoach(`💡 The engine suggests <b>${esc(ex.san)}</b>.${reasonList(ex.reasons)}${footnote(ex.line, ex.eval)}
+          ${alt ? `<div class="small muted">${alt}</div>` : ''}${ASK_LINKS}`);
+      }
+    } catch (e) {
+      console.error('hint failed', e);
       board.setArrows([{ from: m.from, to: m.to, color: 'blue' }]);
-      let ex = null;
-      try { ex = explainEngineMove(chess.fen(), st.hintUci, st.hintAnalysis, chess.history({ verbose: true }).at(-1)); } catch (e) { console.error('explain failed', e); }
-      if (!ex) { setCoach(`💡 The engine suggests the arrow move.${ASK_LINKS}`); return; }
-      setCoach(`💡 The engine suggests <b>${esc(ex.san)}</b>.
-        <ul class="why">${ex.reasons.map(r => `<li>${r}</li>`).join('')}</ul>
-        ${ex.line || ex.eval ? `<div class="small muted">${ex.line ? `Likely next: ${ex.line}` : ''}${ex.line && ex.eval ? ' · ' : ''}${ex.eval ? `${ex.line ? 'Then' : 'Overall'} ${ex.eval}` : ''}</div>` : ''}${ASK_LINKS}`);
+      setCoach(`💡 The engine suggests the arrow move.${ASK_LINKS}`);
+      h.step = 2;
     }
+    h.step = Math.min(h.step + 1, 2);
+  }
+
+  /** Asking for the engine's view counts as one hint per position, however much is asked. */
+  function countHelp() {
+    if (st.helped) return false;
+    st.helped = true;
+    data.hints++;
+    save();
+    return true;
   }
 
   /** The engine's view of the current game position, reusing this turn's analysis when it finished. */
@@ -552,13 +608,29 @@ export function renderGame(view) {
     return r && !r.cancelled && r.bestmove ? r : engine.analyse(chess.fen(), { depth: COACH_DEPTH });
   }
 
+  /**
+   * A deeper look at the game position with the three best moves. Hints, comparisons and the
+   * coach's verdict on the next move all read this one result, so they never contradict each other.
+   */
+  function helpAnalysis() {
+    const fen = chess.fen();
+    if (st.help?.fen !== fen) {
+      const entry = { fen }, ply = chess.history().length;
+      entry.promise = engine.analyse(fen, HELP).then(r => {
+        if (r.cancelled || !r.bestmove) { if (st.help === entry) st.help = null; }
+        else if (st.help === entry && chess.fen() === fen) { st.turnAnalysis = Promise.resolve(r); data.evals[ply] = r.score; renderEval(); }
+        return r;
+      });
+      st.help = entry;
+    }
+    return st.help.promise;
+  }
+
   // ---------- "What if?" board ----------
   // Moves are played on a copy, for either side. The game, its stats and its saved state stay as they were.
   async function openSandbox() {
     if (st.sandbox || st.asking || data.result || st.thinking || chess.turn() !== data.playerColor) return;
-    const counted = st.hintStep === 0 && !st.whatIfUsed; // seeing the engine's view is help, like a hint
-    if (counted) { data.hints++; save(); }
-    st.whatIfUsed = true;
+    const counted = countHelp(); // seeing the engine's view is help, like a hint
     const intro = `🔍 <b>What if?</b> Your game is paused. Play a move for either side to see what happens next.${counted ? ' <span class="muted">This counts as a hint.</span>' : ''}${COMPARE_LINK}`;
     const sb = st.sandbox = {
       chess: new Chess(chess.fen()), busy: true,
@@ -603,7 +675,7 @@ export function renderGame(view) {
     setCoach('Looking at what happens…');
     renderAll([move.from, move.to]);
     const over = sb.chess.isGameOver();
-    const after = over ? null : await engine.analyse(sb.chess.fen(), { depth: COACH_DEPTH });
+    const after = over ? null : await engine.analyse(sb.chess.fen(), WHATIF);
     if (st.sandbox !== sb) return;
     let shown = { html: 'The engine could not look at this position.', arrows: [] };
     try { shown = whatIfMove(fenBefore, move.lan, sb.steps.at(-1).analysis, after, data.playerColor); } catch (e) { console.error('what if failed', e); }
@@ -634,11 +706,13 @@ export function renderGame(view) {
     st.asking = true;
     if (sb) { sb.busy = true; renderBoard(lastMoveSquares(), false); renderControls(); }
     setCoach('Comparing the top moves…');
-    const r = await engine.analyse(fen, { depth: COACH_DEPTH, multipv: 3 }).finally(() => { st.asking = false; });
-    if (st.sandbox !== sb || pos().fen() !== fen || r.cancelled) return;
+    // The game position shares its analysis with the hint, so both name the same best move.
+    const r = await (fen === chess.fen() ? helpAnalysis() : engine.analyse(fen, HELP)).finally(() => { st.asking = false; });
+    if (st.sandbox !== sb || pos().fen() !== fen) return;
+    if (r.cancelled || !r.lines.length) { if (sb) showSandboxStep(); else setCoach('The comparison is not ready. Tap Hint to try again.'); return; }
     const shown = compareMoves(fen, r, data.playerColor, c.history({ verbose: true }).at(-1) || null);
     if (sb) {
-      Object.assign(sb.steps.at(-1), shown);
+      Object.assign(sb.steps.at(-1), shown, { analysis: r });
       showSandboxStep();
     } else {
       setCoach(`${shown.html}<div class="coach-acts"><button data-act="whatif">What if…?</button></div>`);

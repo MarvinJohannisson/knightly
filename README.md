@@ -2,13 +2,14 @@
 
 A mobile-first chess app that runs entirely in the browser (no server, no account, works offline once loaded).
 
-- **Play**: 10 bots from ~400 to full-strength Stockfish, with a coach that grades your moves, hints, takebacks, live opening names and a full game review with accuracy that explains your mistakes and lets you retry them. Turn on **Bot move** during a game to choose the bot's replies yourself and see how a line plays out (such games don't count in your stats). Tap **What if?** on your turn to try moves for both sides on a scratch board, see the engine's answer in plain words and compare the top moves, without touching the game (it counts as a hint).
+- **Play**: 10 bots from ~400 to full-strength Stockfish, with a coach that grades your moves, three-step hints (the idea, then the piece, then the move with its reasons), takebacks, live opening names and a full game review with accuracy that explains your mistakes and lets you retry them. Mistakes found in the review get a second, deeper look, so the better moves it shows hold up. Turn on **Bot move** during a game to choose the bot's replies yourself and see how a line plays out (such games don't count in your stats). Tap **What if?** on your turn to try moves for both sides on a scratch board, see the engine's answer in plain words and compare the top moves, without touching the game (it counts as a hint).
 - **Puzzles**: 4,232 rated puzzles from the Lichess database with your own puzzle rating, practice by theme, hints and explanations.
 - **Learn**: 26 interactive lessons (basics, opening principles and traps, tactics, mating patterns, endgames, thinking habits) and 11 opening courses you can practise move by move.
 
 ## Run locally
 
 Any static file server works, e.g. `python -m http.server` in this folder, then open http://localhost:8000.
+On Windows without Python: `powershell -ExecutionPolicy Bypass -File tests\serve.ps1`.
 (Opening `index.html` directly from disk does not work because browsers block modules and workers on `file://`.)
 
 ## Deploy to GitHub Pages
@@ -26,6 +27,7 @@ When you change files later, bump `VERSION` in `sw.js` so phones pick up the upd
 With the app served locally, open:
 - `tests/test.html` checks every lesson position and solution against Stockfish, the opening lines, the puzzle data and the bots.
 - `tests/e2e.html` plays through the app like a user (game, coach, hint, takeback, review, lessons, puzzle, course).
+- `tests/coach.html` prints what the coach says (hint, reasons, top moves compared) for a set of positions, or for `?fen=...`.
 - `tests/phone.html#/route` previews a screen at phone size.
 - `tests/calibrate.html` measures bot strength with matches and rated puzzles (slow; `?workers=N` runs engines in parallel).
 
@@ -38,6 +40,7 @@ js/board.js      touch chessboard (tap or drag)
 js/engine.js     Stockfish web worker wrapper
 js/bots.js       bot personalities
 js/play.js       game vs bot + coach
+js/explain.js    the coach's words: why a move is good or bad
 js/review.js     post-game analysis
 js/puzzles.js    puzzle trainer      js/themes.js   theme explanations
 js/learn.js      lessons + courses   js/lessons.js, js/courses.js   content
