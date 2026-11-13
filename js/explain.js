@@ -165,6 +165,43 @@ export function lineGain(fen, pv, color, max = 6) {
   return res;
 }
 
+const joinList = a => (a.length > 1 ? `${a.slice(0, -1).join(', ')} and ${a.at(-1)}` : a[0] || '');
+
+/**
+ * What a sacrifice buys, as far as the board shows it. `before` is the position before the
+ * sacrifice, `after` the one once `reply` has taken; `their` is "their" or "your" for the taker.
+ * -> phrases such as "their pawns are doubled on the e-file"
+ */
+function compensation(before, after, reply, me, their) {
+  const opp = other(me);
+  const out = [];
+  const doubled = ch => {
+    const n = {};
+    for (const p of pieces(ch, opp)) if (p.type === 'p') n[p.square[0]] = (n[p.square[0]] || 0) + 1;
+    return Object.keys(n).filter(f => n[f] > 1);
+  };
+  const fresh = doubled(after).filter(f => !doubled(before).includes(f));
+  if (fresh.length) out.push(`${their} pawns are doubled on the ${fresh[0]}-file`);
+
+  const king = pieces(after, opp).find(p => p.type === 'k');
+  const near = (a, b2) => Math.abs(FILES.indexOf(a[0]) - FILES.indexOf(b2[0])) <= 1 && Math.abs(a[1] - b2[1]) <= 1;
+  if (reply.piece === 'k') out.push(`${their} king is drawn out into the open`);
+  else if (reply.piece === 'p' && king && near(reply.from, king.square)) out.push(`${their} king has lost part of its pawn cover`);
+
+  // A pawn that took toward the centre can leave the pawn behind it stuck, and a bishop behind that.
+  if (reply.piece === 'p') {
+    const home = opp === 'w' ? -1 : 1;
+    const behind = step(reply.to, [0, home]);
+    const stuck = behind && after.get(behind);
+    if (stuck && stuck.type === 'p' && stuck.color === opp) {
+      const bishop = [[1, home], [-1, home]].map(d => step(behind, d))
+        .find(sq => sq && after.get(sq)?.type === 'b' && after.get(sq).color === opp);
+      out.push(bishop ? `${their} pawn on ${behind} is stuck, which blocks ${their} bishop on ${bishop}` : `${their} pawn on ${behind} is stuck`);
+    }
+  }
+  return out;
+}
+
 // ---------- evaluation in words ----------
 const BANDS = [
   [700, 'winning', 'a winning position'], [350, 'clearly better', 'a clearly better position'],
@@ -389,8 +426,32 @@ export function explainMove(fen, uci, analysis = {}, prev = null, player = null)
   const who = mine ? me : opp;
   const { gain, plies, text } = lineGain(fen, pv, me, 4);
   const showsLine = !mateIn && gain > explainedGain && gain >= 1 && plies >= 2;
+  let toldLine = showsLine;
   if (showsLine) {
     add(`${m.captured ? 'It wins material' : 'It sets up a tactic'}: ${movesInWords(fen, pv, plies, who)}, and ${you}'ve won ${text}.`, 'tactic');
+  }
+
+  // --- Material given up on purpose ---
+  // The engine expects the reply to take something. Without a word about it, a sacrifice or a
+  // gambit looks like a blunder, so say that it is meant and what it buys.
+  let reply = null;
+  const afterReply = new Chess(c.fen());
+  try { if (pv[1]) reply = afterReply.move(uciToMove(pv[1])); } catch { }
+  const down = reply?.captured ? balance(census(b), me) - balance(census(afterReply), me) : 0;
+  if (down >= 1 && !mateIn && !showsLine) {
+    const what = swapText(census(b), census(afterReply), opp);
+    const take = `<b>${esc(reply.san)}</b>`;
+    if (gain >= 0 && pv.length >= 4) {
+      // Taken and taken back at once is a trade, not a sacrifice. Only worth a word when the
+      // moved piece itself is what gets traded; otherwise the usual line shows it.
+      if (reply.to === m.to) { add(`It offers a trade: ${movesInWords(fen, pv, 3, who)}.`); toldLine = true; }
+    } else if (sign * scoreToCp(score) >= -60) {
+      const got = compensation(b, afterReply, reply, me, their);
+      // Further out the engine's line is less sure, so a later recovery is only mentioned.
+      const back = lineGain(fen, pv, me, 6).gain >= 0 ? ` The engine expects ${you} to get the material back within a few moves.` : '';
+      add((got.length ? `It <b>gives up ${what}</b> on purpose. After ${take}, ${joinList(got)}.`
+        : `It <b>gives up ${what}</b> on purpose: the engine rates the active play ${you} get after ${take} higher than the material.`) + back, 'sacrifice');
+    } else add(`It lets ${what} go after ${take}, but holding on to it would cost more.`);
   }
 
   // --- Positional ideas ---
@@ -454,9 +515,9 @@ export function explainMove(fen, uci, analysis = {}, prev = null, player = null)
     else add(`A quiet move that improves ${your} position. There is no tactic to find here.`);
   }
 
-  const tactical = ['mate', 'promo', 'free', 'wins', 'fork', 'skewer', 'pin', 'discovered', 'tactic', 'threat'].some(t => tags.has(t));
-  // No line when the tactic reason already spells it out.
-  return done({ line: pv.length > 1 && !showsLine ? movesInWords(fen, pv, 4, who) : '', eval: evalWords(score, who), tactical, generic, mateIn, danger });
+  const tactical = ['mate', 'promo', 'free', 'wins', 'fork', 'skewer', 'pin', 'discovered', 'tactic', 'threat', 'sacrifice'].some(t => tags.has(t));
+  // No line when a reason already spells it out.
+  return done({ line: pv.length > 1 && !toldLine ? movesInWords(fen, pv, 4, who) : '', eval: evalWords(score, who), tactical, generic, mateIn, danger });
 }
 
 /** The first nudge of a hint: what kind of move to look for, without giving the move away. */
@@ -472,6 +533,7 @@ export function hintIdea(fen, uci, analysis = {}, prev = null) {
   if (t.has('promo')) return 'One of your pawns can <b>promote</b>.';
   if (t.has('free')) return 'One of their pieces is <b>not defended</b>. Can you take it?';
   if (t.has('wins') || t.has('tactic')) return 'You can <b>win material</b> here. Look at every check and every capture.';
+  if (t.has('sacrifice')) return 'The best move <b>gives something up</b> to get more in return. What could you offer?';
   if (t.has('check')) return 'You are in <b>check</b>. Find the safest way out.';
   if (t.has('danger') && ex.danger) return `Your <b>${NAMES[ex.danger.type]}</b> on ${ex.danger.square} is under attack. Deal with that first.`;
   if (t.has('recapture')) return 'They just captured something. Can you <b>take back</b>?';

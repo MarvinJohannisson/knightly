@@ -197,6 +197,19 @@ async function run() {
   const cut = await engine.analyse(open4, { depth: 18, multipv: 3, movetime: 400 });
   log(cut.lines.length === 3 && new Set(cut.lines.map(l => l.move)).size === 3 && cut.lines.every(l => l.depth === cut.lines[0].depth) && cut.bestmove === cut.lines[0].move,
     'a search cut short still ranks three different moves at one depth: ' + cut.lines.map(l => `${l.move}@${l.depth}`).join(' '));
+  // a move that gives material away on purpose must say so, and say what it buys
+  const sacFen = 'r2qkbnr/1b1npppp/p1p5/1p1pP3/P2P4/1PNBBN2/2P2PPP/R1Q1K2R w KQkq - 1 10';
+  const sacSeen = { score: { cp: 370 }, lines: [{ pv: ['e5e6', 'f7e6', 'c3e2', 'g8h6'] }] };
+  const sac = explainMove(sacFen, 'e5e6', sacSeen);
+  log(/gives up a pawn on purpose/.test(plain(sac)) && /doubled on the e-file/.test(plain(sac)) && /blocks their bishop on f8/.test(plain(sac)) && !sac.generic,
+    'a pawn sacrifice is called one, with what it buys: ' + plain(sac));
+  log(/gives something up/.test(strip(hintIdea(sacFen, 'e5e6', sacSeen))), 'the first hint for a sacrifice says something is offered');
+  const swap = plain(explainMove('4k3/8/8/3p4/8/2N1P3/8/4K3 w - - 0 30', 'e3e4', { score: { cp: 0 }, lines: [{ pv: ['e3e4', 'd5e4', 'c3e4', 'e8e7'] }] }));
+  log(/offers a trade: you play e4, they reply dxe4, then you play Nxe4/.test(swap) && !/on purpose/.test(swap), 'a pawn that comes straight back is a trade, not a sacrifice: ' + swap);
+  const allowed = plain(explainMove(ruy, 'a7a6', { score: { cp: 40 }, lines: [{ pv: ['a7a6', 'b5c6', 'd7c6', 'e1g1'] }] }));
+  log(!/offers|gives up/.test(allowed), 'letting them trade pieces is neither an offer nor a sacrifice: ' + allowed);
+  const lost = plain(explainMove(sacFen, 'e5e6', { score: { cp: -300 }, lines: [{ pv: ['e5e6', 'f7e6', 'c3e2', 'g8h6'] }] }));
+  log(/holding on to it would cost more/.test(lost), 'in a bad position, giving material is not dressed up as a sacrifice');
   const backRank = '6k1/5ppp/8/8/8/8/q4PPP/3R2K1 w - - 0 30';
   const mateCmp = strip(compareMoves(backRank, await engine.analyse(backRank, { depth: 10, multipv: 3 }), 'w').html).replace(/\s+/g, ' ');
   log(/forces checkmate/.test(mateCmp) && /misses the forced checkmate/.test(mateCmp), 'compare says what the other moves miss: ' + mateCmp.slice(0, 140));
