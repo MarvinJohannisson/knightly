@@ -82,6 +82,26 @@ function unblocked(before, m, me) {
   return out.includes('b') ? out.sort() : [];
 }
 
+/** How many squares the piece on `sq` attacks or defends. */
+function reach(chess, sq, color) {
+  let n = 0;
+  for (const f of FILES) for (let r = 1; r <= 8; r++) {
+    const t = f + r;
+    if (t !== sq && chess.attackers(t, color).includes(sq)) n++;
+  }
+  return n;
+}
+
+/** A square in the opponent's half that one of `me`'s pawns guards and no enemy pawn can ever attack. */
+function isOutpost(chess, sq, me) {
+  const r = +sq[1], f = FILES.indexOf(sq[0]), dir = me === 'w' ? 1 : -1;
+  if (me === 'w' ? r < 4 || r > 6 : r > 5 || r < 3) return false;
+  const guarded = chess.attackers(sq, me).some(s => chess.get(s).type === 'p');
+  const chasers = pieces(chess, other(me)).some(p => p.type === 'p'
+    && Math.abs(FILES.indexOf(p.square[0]) - f) === 1 && (+p.square[1] - r) * dir > 0);
+  return guarded && !chasers;
+}
+
 /**
  * A list of UCI moves as plain words (HTML): "you play Rb1, they reply Kg8, then you play dxc6".
  * `me` is the side called "you"; it defaults to the side to move.
@@ -211,6 +231,8 @@ const BANDS = [
   [-Infinity, 'losing', 'a losing position'],
 ];
 const band = cp => BANDS.findIndex(b => cp > b[0]);
+/** A position in two or three words for the side `cp` belongs to: "slightly better", "losing". */
+export const bandWord = cp => BANDS[band(cp)][1];
 
 /** How the position stands for `me`, in words. `score` is from White's point of view. */
 export function evalWords(score, me) {
@@ -506,12 +528,55 @@ export function explainMove(fen, uci, analysis = {}, prev = null, player = null)
   const central = ['c3', 'd4', 'e4', 'f3', 'c6', 'd5', 'e5', 'f6'];
   if (!reasons.length && m.piece === 'n' && central.includes(m.to) && !central.includes(m.from)) add('It brings the knight toward the center, where it reaches the most squares.');
 
+  // --- Better squares for pieces and king ---
+  if ((m.piece === 'n' || m.piece === 'b') && !m.captured && isOutpost(c, m.to, me)) {
+    add(`It puts ${your} ${NAMES[m.piece]} on an <b>outpost</b> on ${m.to}: a pawn guards it, and no pawn of ${their}s can chase it away.`, 'outpost');
+  }
+  const longDiag = me === 'w' ? { b2: 'c1', g2: 'f1' } : { b7: 'c8', g7: 'f8' };
+  if (m.piece === 'b' && longDiag[m.to] === m.from) add(`It puts ${your} bishop on the <b>long diagonal</b>, aiming through the center.`, 'develop');
+  if ('rq'.includes(m.piece) && !m.captured) {
+    // Two heavy pieces on one file, nothing between them.
+    const dir = +m.to[1] < 5 ? 1 : -1;
+    for (const d of [dir, -dir]) {
+      let sq = step(m.to, [0, d]);
+      while (sq && !c.get(sq)) sq = step(sq, [0, d]);
+      const p = sq && c.get(sq);
+      if (p && p.color === me && 'rq'.includes(p.type) && sq !== m.from && m.from[0] !== m.to[0]) {
+        add(p.type === 'r' && m.piece === 'r' ? `It <b>doubles</b> ${your} rooks on the ${m.to[0]}-file, so they back each other up.`
+          : `It lines up ${your} queen and rook on the ${m.to[0]}-file.`, 'plan');
+        break;
+      }
+    }
+  }
+  // Luft: a pawn step in front of the castled king gives it a square off the back rank.
+  const king = pieces(c, me).find(p => p.type === 'k');
+  if (m.piece === 'p' && !m.captured && king && king.square[1] === backRank && fullmove >= 10
+    && Math.abs(FILES.indexOf(m.from[0]) - FILES.indexOf(king.square[0])) <= 1 && m.from[1] === (me === 'w' ? '2' : '7')
+    && 'abcfgh'.includes(king.square[0])) {
+    add(`It gives ${your} king an escape square (<b>luft</b>), so a check on the back rank cannot be mate.`, 'safety');
+  }
+  if ('nbrq'.includes(m.piece) && !m.captured && reasons.length < 2) {
+    const was = reach(b, m.from, me), now = reach(c, m.to, me);
+    if (now - was >= 4 && now >= 7) add(`It makes ${your} ${NAMES[m.piece]} much more active: it reaches ${now} squares instead of ${was}.`, 'activity');
+  }
+  // Trading down when ahead in material.
+  if (m.captured && (tags.has('trade') || tags.has('recapture'))) {
+    const ahead = balance(census(c), me);
+    if (ahead >= 2) add(`Trading pieces when ${you}'re ahead in material brings ${you} closer to a won endgame.`);
+  }
+
   // --- Fallback ---
   const cp = sign * scoreToCp(score);
   const generic = !reasons.length;
   if (generic) {
-    if (cp > 150) add(`A calm move that keeps ${your} advantage.`);
-    else if (cp < -150) add('The toughest defense in a difficult position: other moves lose faster.');
+    // Even a quiet move has a purpose: the move the engine wants to play next.
+    let next = null;
+    if (pv.length >= 3) { const t = new Chess(c.fen()); try { t.move(uciToMove(pv[1])); next = t.move(uciToMove(pv[2])); } catch { } }
+    const plan = next ? ` The plan is <b>${esc(next.san)}</b> next.` : '';
+    if (cp > 150) add(`A calm move that keeps ${your} advantage.${plan}`);
+    else if (cp < -150) add(`The toughest defense in a difficult position: other moves lose faster.${plan}`);
+    else if (next && next.from !== m.to) add(`A quiet move that gets ready for <b>${esc(next.san)}</b>.`);
+    else if (next) add(`A quiet move. The plan is <b>${esc(next.san)}</b> next.`);
     else add(`A quiet move that improves ${your} position. There is no tactic to find here.`);
   }
 

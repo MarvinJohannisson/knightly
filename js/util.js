@@ -160,7 +160,10 @@ export function classify(drop, isBest) {
   if (drop < 25) return 'mistake';
   return 'blunder';
 }
-export const CLASS_LABEL = { best: 'Best', good: 'Good', inaccuracy: 'Inaccuracy', mistake: 'Mistake', blunder: 'Blunder', book: 'Book' };
+export const CLASS_LABEL = {
+  brilliant: 'Brilliant', great: 'Great', best: 'Best', good: 'Good', book: 'Book',
+  inaccuracy: 'Inaccuracy', mistake: 'Mistake', miss: 'Miss', blunder: 'Blunder',
+};
 export function moveAccuracy(drop) {
   return Math.max(0, Math.min(100, 103.1668 * Math.exp(-0.04354 * Math.max(0, drop)) - 3.1669));
 }

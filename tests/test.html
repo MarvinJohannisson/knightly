@@ -6,7 +6,8 @@
 import { Chess } from '../vendor/chess.js';
 import { LESSONS } from '../js/lessons.js';
 import { COURSES } from '../js/courses.js';
-import { engine } from '../js/engine.js';
+import { engine, analyser } from '../js/engine.js';
+import { gradeMoves, seeGain, sacrificed, phaseOf, gameAccuracy, gameRating } from '../js/grading.js';
 import { BOTS, botMove, thinkTime } from '../js/bots.js';
 import { explainMove, mistakeReason, movesInWords, whatIfMove, compareMoves, lineGain, hintIdea, runnerUp, evalWords, shiftWords } from '../js/explain.js';
 import { loadOpenings, isBook, bookMoves } from '../js/openings.js';
@@ -239,6 +240,80 @@ async function run() {
   const backRank = '6k1/5ppp/8/8/8/8/q4PPP/3R2K1 w - - 0 30';
   const mateCmp = strip(compareMoves(backRank, await engine.analyse(backRank, { depth: 10, multipv: 3 }), 'w').html).replace(/\s+/g, ' ');
   log(/forces checkmate/.test(mateCmp) && /misses the forced checkmate/.test(mateCmp), 'compare says what the other moves miss: ' + mateCmp.slice(0, 140));
+
+  // ---------- positional reasons ----------
+  const why = (fen, uci, pv = [uci], cp = 0) => plain(explainMove(fen, uci, { score: { cp }, lines: [{ pv }] }));
+  const outpost = why('4k3/pp3ppp/3p4/8/4P3/2N5/PPP2PPP/4K3 w - - 0 20', 'c3d5');
+  log(/outpost on d5/.test(outpost), 'a knight on a square no pawn can chase it from is an outpost: ' + outpost);
+  const fian = why('rnbqkbnr/pppppppp/8/8/8/6P1/PPPPPP1P/RNBQKBNR w KQkq - 0 2', 'f1g2');
+  log(/long diagonal/.test(fian), 'a fianchetto is named: ' + fian);
+  const doubled = why('6k1/5ppp/8/8/8/8/R4PPP/3R2K1 w - - 0 25', 'a2d2');
+  log(/doubles your rooks on the d-file/.test(doubled), 'doubling rooks is named: ' + doubled);
+  const luft = why('r5k1/5ppp/8/8/8/8/5PPP/3R2K1 w - - 0 25', 'h2h3');
+  log(/luft/.test(luft), 'a pawn step that frees the king is luft: ' + luft);
+  const active = why('k7/8/8/8/8/N7/8/4K3 w - - 0 40', 'a3c4');
+  log(/much more active: it reaches 8 squares instead of 4/.test(active), 'a piece that gains many squares is more active: ' + active);
+  const tradeAhead = why('3q1rk1/5ppp/8/8/8/8/5PPP/RR1Q2K1 w - - 0 40', 'd1d8', ['d1d8', 'f8d8'], 500);
+  log(/trades queens/.test(tradeAhead) && /ahead in material/.test(tradeAhead), 'trading when ahead says why: ' + tradeAhead);
+  const plan = why('r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3', 'h2h3', ['h2h3', 'g8f6', 'b1c3']);
+  log(!/no tactic/.test(plan), 'a quiet move names the plan when the engine has one: ' + plan);
+
+  // ---------- game review grading ----------
+  const hanging = new Chess('4k3/8/8/3n4/8/8/8/3QK3 w - - 0 1');
+  log(seeGain(hanging, 'd5') === 3, 'a loose knight can be won: ' + seeGain(hanging, 'd5'));
+  const guarded = new Chess('4k3/8/4p3/3n4/4P3/8/8/4K3 w - - 0 1');
+  log(seeGain(guarded, 'd5') === 2, 'pawn takes a knight that a pawn guards: wins 2, got ' + seeGain(guarded, 'd5'));
+  const pawnTrade = new Chess('4k3/8/4p3/3p4/4P3/8/8/4K3 w - - 0 1');
+  log(seeGain(pawnTrade, 'd5') === 0, 'a guarded pawn is just a trade: ' + seeGain(pawnTrade, 'd5'));
+  const play = (ucis, fen) => { const c = new Chess(fen); const v = ucis.map(u => c.move(uciToMove(u))); return { v, fens: [v[0].before, ...v.map(m => m.after)] }; };
+  const greek = play(['d3h7'], 'r1bq1rk1/pppn1ppp/4p3/3pP3/1b1P4/2NB1N2/PPP2PPP/R2QK2R w KQ - 0 8');
+  log(sacrificed(greek.fens[0], greek.v[0]) === 2, 'Bxh7+ gives up a bishop for a pawn: ' + sacrificed(greek.fens[0], greek.v[0]));
+  const trade = play(['e4d5'], 'rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2');
+  log(sacrificed(trade.fens[0], trade.v[0]) <= 0, 'exd5 is not a sacrifice: ' + sacrificed(trade.fens[0], trade.v[0]));
+  log(phaseOf(new Chess().fen(), 0) === 'opening' && phaseOf('8/8/4k3/8/8/8/4K3/R7 w - - 0 60', 100) === 'endgame', 'game phases');
+
+  // Grades from made-up engine numbers, so each rule is tested on its own.
+  const g1 = play(['e2e4', 'e7e5', 'g1f3', 'd7d6']);
+  const fake = (cps, best, alt = []) => gradeMoves(g1.v, g1.fens, { cps, best, alt });
+  // cps[i] is the position before move i, White's view.
+  let gm = fake([30, 30, 30, 30, 600], ['e2e4', 'e7e5', 'g1f3', 'b8c6']);
+  log(gm[3].cls === 'blunder', 'a big drop is a blunder: ' + gm[3].cls);
+  const g2 = play(['e2e4', 'e7e5', 'g1f3', 'd7d6', 'b1c3']);
+  gm = gradeMoves(g2.v, g2.fens, { cps: [30, 30, 30, 30, 700, 40], best: ['e2e4', 'e7e5', 'g1f3', 'b8c6', 'f3e5'] });
+  log(gm[4].cls === 'miss', 'not punishing their blunder, without ending worse than before it, is a miss: ' + gm[4].cls);
+  gm = gradeMoves(g2.v, g2.fens, { cps: [30, 30, 30, 30, 700, -300], best: ['e2e4', 'e7e5', 'g1f3', 'b8c6', 'f3e5'] });
+  log(gm[4].cls === 'blunder', 'ending worse than before their slip is a plain blunder: ' + gm[4].cls);
+  gm = fake([30, 30, 30, 30, 30], ['e2e4', 'e7e5', 'g1f3', 'd7d6'], [null, null, { move: 'b1c3', score: { cp: -500 } }, null]);
+  log(gm[2].cls === 'great', 'the only good move is great: ' + gm[2].cls);
+  gm = fake([30, 30, 30, 30, 30], ['e2e4', 'e7e5', 'g1f3', 'd7d6'], [null, null, { move: 'b1c3', score: { cp: 0 } }, null]);
+  log(gm[2].cls === 'best', 'a best move with fine alternatives is just best: ' + gm[2].cls);
+  const perfect = gameAccuracy(fake([30, 30, 30, 30, 30], ['e2e4', 'e7e5', 'g1f3', 'd7d6']), [30, 30, 30, 30, 30], 'w');
+  const oneBlunder = fake([30, 30, 30, -800, -800], ['e2e4', 'e7e5', 'b1c3', 'd7d6']);
+  const accB = gameAccuracy(oneBlunder, [30, 30, 30, -800, -800], 'w');
+  log(perfect > 99 && accB < 60, `accuracy: perfect play ${perfect.toFixed(1)}, one blunder in two moves ${accB.toFixed(1)}`);
+
+  // The same rules on real engine numbers.
+  async function engineReview(v, fens) {
+    const cps = [], best = [], alt = [];
+    for (const f of fens) {
+      const c = new Chess(f);
+      if (c.isCheckmate()) { cps.push(c.turn() === 'w' ? -10000 : 10000); best.push(null); alt.push(null); continue; }
+      const r = await analyser.analyse(f, { depth: 14, multipv: 2 });
+      cps.push(scoreToCp(r.score)); best.push(r.bestmove);
+      alt.push(r.lines[1] ? { move: r.lines[1].move, score: r.lines[1].score } : null);
+    }
+    return gradeMoves(v, fens, { cps, best, alt });
+  }
+  await analyser.init();
+  const legal = play(['e2e4', 'e7e5', 'g1f3', 'd7d6', 'f1c4', 'c8g4', 'b1c3', 'g7g6', 'f3e5', 'g4d1', 'c4f7', 'e8e7', 'c3d5']);
+  const lg = await engineReview(legal.v, legal.fens);
+  log(lg[8].cls === 'brilliant', "Légal's queen sacrifice 5.Nxe5 is brilliant: " + lg[8].cls);
+  log(['mistake', 'blunder'].includes(lg[9].cls), 'taking the queen into mate is a blunder: ' + lg[9].cls);
+  const qh4 = play(['e2e4', 'e7e5', 'g1f3', 'd8h4', 'd2d3']);
+  const qg = await engineReview(qh4.v, qh4.fens);
+  log(qg[3].cls === 'blunder' && qg[4].cls === 'miss', `leaving the hung queen is a miss: ${qg[3].cls}, ${qg[4].cls}`);
+  log(gameRating(lg, 'w') == null, 'no game rating from fewer than 8 moves');
+  flush();
 
   lines.unshift(fails ? `RESULT: ${fails} FAILURES` : 'RESULT: ALL PASSED');
   flush();

@@ -1,11 +1,18 @@
-// Stockfish (WASM, with asm.js fallback) running in a Web Worker.
-// All requests go through a serial queue; scores are reported from WHITE's point of view.
+// Stockfish running in Web Workers. All requests to one engine go through a serial queue; scores
+// are reported from WHITE's point of view.
+// - `engine` is the 2019 Stockfish the bots were tuned on (Skill Level, Contempt); it plays their moves.
+// - `analyser` is Stockfish 19 lite (NNUE), much stronger and faster; it judges moves for the
+//   coach, hints and the game review. It falls back to the old engine where WASM is missing.
 
 const wasmSupported = typeof WebAssembly === 'object' &&
   WebAssembly.validate(Uint8Array.of(0x0, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00));
 
 export class Engine {
-  constructor() {
+  /** file: worker script under vendor/; legacy: the 2019 build, which has the Contempt option. */
+  constructor({ file = () => (wasmSupported ? 'stockfish/stockfish.wasm.js' : 'stockfish/stockfish.js'), legacy = true, hash = 16 } = {}) {
+    this.file = file;
+    this.legacy = legacy;
+    this.hash = hash;
     this.worker = null;
     this.queue = [];
     this.current = null;
@@ -17,8 +24,7 @@ export class Engine {
     if (this.readyPromise) return this.readyPromise;
     this.readyPromise = new Promise((resolve, reject) => {
       try {
-        const file = wasmSupported ? 'stockfish.wasm.js' : 'stockfish.js';
-        this.worker = new Worker(new URL('../vendor/stockfish/' + file, import.meta.url));
+        this.worker = new Worker(new URL('../vendor/' + this.file(), import.meta.url));
       } catch (e) { reject(e); return; }
       this._onReady = resolve;
       this.worker.onmessage = e => this._line(String(e.data));
@@ -37,7 +43,7 @@ export class Engine {
   }
 
   _line(line) {
-    if (line === 'uciok') { this._send('setoption name Hash value 16'); this._send('isready'); return; }
+    if (line === 'uciok') { this._send(`setoption name Hash value ${this.hash}`); this._send('isready'); return; }
     if (line === 'readyok') {
       if (this._onReady) { this._onReady(); this._onReady = null; this._next(); }
       return;
@@ -87,7 +93,8 @@ export class Engine {
     this._setOption('Skill Level', job.skill ?? 20);
     // Contempt favours the side to move, which would make every move look like it loses ~65cp.
     // Only the skill-level bots keep the default, so they still play on rather than take draws.
-    this._setOption('Contempt', job.skill == null ? 0 : 24);
+    // Stockfish 19 has no contempt.
+    if (this.legacy) this._setOption('Contempt', job.skill == null ? 0 : 24);
     this._setOption('MultiPV', job.multipv || 1);
     this._send('position fen ' + job.fen);
     let go = 'go';
@@ -116,3 +123,6 @@ export class Engine {
 }
 
 export const engine = new Engine();
+export const analyser = wasmSupported
+  ? new Engine({ file: () => 'stockfish19/stockfish-19-lite-single.js', legacy: false, hash: 32 })
+  : engine;

@@ -1,10 +1,11 @@
 // Offline support: precache the app, then serve from cache and refresh in the background.
-const VERSION = 'knightly-v15';
+const VERSION = 'knightly-v17';
 const CORE = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/app.js', 'js/util.js', 'js/board.js', 'js/engine.js', 'js/bots.js', 'js/play.js', 'js/review.js',
-  'js/puzzles.js', 'js/themes.js', 'js/learn.js', 'js/lessons.js', 'js/courses.js', 'js/openings.js', 'js/tips.js', 'js/explain.js',
+  'js/puzzles.js', 'js/themes.js', 'js/learn.js', 'js/lessons.js', 'js/courses.js', 'js/openings.js', 'js/tips.js', 'js/explain.js', 'js/grading.js',
   'vendor/chess.js', 'vendor/stockfish/stockfish.wasm.js', 'vendor/stockfish/stockfish.wasm', 'vendor/stockfish/stockfish.js',
+  'vendor/stockfish19/stockfish-19-lite-single.js', 'vendor/stockfish19/stockfish-19-lite-single.wasm',
   'data/openings.json', 'data/puzzles.json',
   'assets/icons/icon.svg', 'assets/icons/icon-192.png', 'assets/icons/icon-512.png',
   ...['w', 'b'].flatMap(c => ['K', 'Q', 'R', 'B', 'N', 'P'].map(p => `assets/pieces/${c}${p}.svg`)),

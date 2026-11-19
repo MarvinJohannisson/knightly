@@ -2,7 +2,8 @@
 
 A mobile-first chess app that runs entirely in the browser (no server, no account, works offline once loaded).
 
-- **Play**: 10 bots from ~400 to full-strength Stockfish that play known openings and choose natural-looking moves, with a coach that grades your moves, three-step hints (the idea, then the piece, then the move with its reasons), takebacks, live opening names and a full game review with accuracy that explains your mistakes and lets you retry them. Mistakes found in the review get a second, deeper look, so the better moves it shows hold up. Tap **What if?** on your turn to try moves for both sides on a scratch board, see the engine's answer in plain words and compare the top moves, without touching the game (it counts as a hint).
+- **Play**: 10 bots from ~400 to full-strength Stockfish that play known openings and choose natural-looking moves, with a coach that grades your moves, three-step hints (the idea, then the piece, then the move with its reasons), takebacks, live opening names and a full game review (see below). Tap **What if?** on your turn to try moves for both sides on a scratch board, see the engine's answer in plain words and compare the top moves, without touching the game (it counts as a hint).
+- **Game review**: Stockfish 19 grades every move (Brilliant, Great, Best, Good, Book, Inaccuracy, Mistake, Miss, Blunder). The report tells the story of the game in a sentence, lists the key moments (tap one to jump there) and shows accuracy (computed the Lichess way), an estimated game rating, accuracy by phase and a chart of the game; step through the moves with an eval bar, the grade on the moved piece, a short explanation for every move (tactics, plans, outposts, open files, king safety, what the better move would have done), and the best line or their reply played out on the board. Key moves get a second, deeper look, so the grades and better moves hold up. **Learn from your mistakes** replays your worst moves so you can find the better move yourself.
 - **Puzzles**: 4,232 rated puzzles from the Lichess database with your own puzzle rating, practice by theme, hints and explanations.
 - **Learn**: 26 interactive lessons (basics, opening principles and traps, tactics, mating patterns, endgames, thinking habits) and 11 opening courses you can practise move by move.
 
@@ -37,11 +38,12 @@ With the app served locally, open:
 index.html, css/app.css, sw.js, manifest.webmanifest
 js/app.js        router, home, settings
 js/board.js      touch chessboard (tap or drag)
-js/engine.js     Stockfish web worker wrapper
+js/engine.js     Stockfish web workers: the bots' engine and the Stockfish 19 analyser
 js/bots.js       bot personalities, opening book use, how they choose moves
 js/play.js       game vs bot + coach
 js/explain.js    the coach's words: why a move is good or bad
-js/review.js     post-game analysis
+js/review.js     post-game review screen
+js/grading.js    move grades, accuracy, game rating, phases
 js/puzzles.js    puzzle trainer      js/themes.js   theme explanations
 js/learn.js      lessons + courses   js/lessons.js, js/courses.js   content
 data/            puzzles.json, openings.json
@@ -50,7 +52,7 @@ vendor/          chess.js, stockfish
 
 ## Credits and licences
 
-- Stockfish (GPLv3) via stockfish.js by Niklas Fiekas. See `vendor/stockfish/COPYING.txt`. Because Stockfish is GPL, keep the repository public so its source stays available.
+- Stockfish (GPLv3). The bots play with stockfish.js by Niklas Fiekas (`vendor/stockfish/`); the coach and the review use Stockfish 19 lite via stockfish.js by Nathan Rugg and Chess.com (`vendor/stockfish19/`). See the `COPYING.txt` in each folder. Because Stockfish is GPL, keep the repository public so its source stays available.
 - chess.js by Jeff Hlywa (BSD-2-Clause), `vendor/chess.js-LICENSE.txt`.
 - Puzzles and opening names: Lichess open database (CC0).
 - Piece set "cburnett" by Colin M.L. Burnett (CC BY-SA 3.0).
