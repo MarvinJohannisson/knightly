@@ -241,6 +241,23 @@ async function run() {
   const mateCmp = strip(compareMoves(backRank, await engine.analyse(backRank, { depth: 10, multipv: 3 }), 'w').html).replace(/\s+/g, ' ');
   log(/forces checkmate/.test(mateCmp) && /misses the forced checkmate/.test(mateCmp), 'compare says what the other moves miss: ' + mateCmp.slice(0, 140));
 
+  // ---------- positional reasons ----------
+  const why = (fen, uci, pv = [uci], cp = 0) => plain(explainMove(fen, uci, { score: { cp }, lines: [{ pv }] }));
+  const outpost = why('4k3/pp3ppp/3p4/8/4P3/2N5/PPP2PPP/4K3 w - - 0 20', 'c3d5');
+  log(/outpost on d5/.test(outpost), 'a knight on a square no pawn can chase it from is an outpost: ' + outpost);
+  const fian = why('rnbqkbnr/pppppppp/8/8/8/6P1/PPPPPP1P/RNBQKBNR w KQkq - 0 2', 'f1g2');
+  log(/long diagonal/.test(fian), 'a fianchetto is named: ' + fian);
+  const doubled = why('6k1/5ppp/8/8/8/8/R4PPP/3R2K1 w - - 0 25', 'a2d2');
+  log(/doubles your rooks on the d-file/.test(doubled), 'doubling rooks is named: ' + doubled);
+  const luft = why('r5k1/5ppp/8/8/8/8/5PPP/3R2K1 w - - 0 25', 'h2h3');
+  log(/luft/.test(luft), 'a pawn step that frees the king is luft: ' + luft);
+  const active = why('k7/8/8/8/8/N7/8/4K3 w - - 0 40', 'a3c4');
+  log(/much more active: it reaches 8 squares instead of 4/.test(active), 'a piece that gains many squares is more active: ' + active);
+  const tradeAhead = why('3q1rk1/5ppp/8/8/8/8/5PPP/RR1Q2K1 w - - 0 40', 'd1d8', ['d1d8', 'f8d8'], 500);
+  log(/trades queens/.test(tradeAhead) && /ahead in material/.test(tradeAhead), 'trading when ahead says why: ' + tradeAhead);
+  const plan = why('r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3', 'h2h3', ['h2h3', 'g8f6', 'b1c3']);
+  log(!/no tactic/.test(plan), 'a quiet move names the plan when the engine has one: ' + plan);
+
   // ---------- game review grading ----------
   const hanging = new Chess('4k3/8/8/3n4/8/8/8/3QK3 w - - 0 1');
   log(seeGain(hanging, 'd5') === 3, 'a loose knight can be won: ' + seeGain(hanging, 'd5'));

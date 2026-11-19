@@ -166,6 +166,8 @@ async function run() {
   const sum = await waitFor(() => D().querySelector('#graph') && D().querySelector('#summary').textContent + D().querySelector('#details').textContent, 30000);
   log(!!sum, 'review summary: ' + (sum || '').replace(/\s+/g, ' ').slice(0, 120));
   log(!!D().querySelector('#details .c.blunder'), 'review flags blunders');
+  const story = D().querySelector('#summary .story')?.textContent || '';
+  log(/2\. g4/.test(story) && /forced mate/.test(story) && D().querySelectorAll('#summary .moment').length >= 1, 'key moments tell the story: ' + story);
   log(/Accuracy/.test(sum || '') && !D().querySelector('#summary').hidden && D().querySelector('#stage').hidden, 'review opens on the report');
   D().querySelector('#nextMistake').click(); // 1.f3 is graded too now
   await sleep(100);
@@ -228,6 +230,11 @@ async function run() {
   act('Stop');
   await sleep(300);
   log(!D().querySelector('#summary').hidden, 'stop leaves retry mode');
+  const moment = D().querySelector('#summary .moment');
+  const momentMove = moment.querySelector('.mn').textContent;
+  moment.click();
+  await sleep(200);
+  log(D().querySelector('#summary').hidden && D().querySelector('#comment').textContent.includes(momentMove.replace(/\s+/g, ' ')), 'a key moment opens that move: ' + momentMove);
 
   // a sound move that is not the engine's first choice still counts
   store('game', { botId: 'theo', playerColor: 'w', moves: ['e2e4', 'e7e5', 'g1f3', 'b8c6', 'f1c4', 'g8f6', 'c4f7', 'e8f7'], evals: {}, marks: {}, result: { winner: 'b', reason: 'resignation' }, recorded: true, hints: 0, takebacks: 0, started: 5 });

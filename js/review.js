@@ -6,7 +6,7 @@ import { Board, destsFrom, checkSquare } from './board.js';
 import { analyser } from './engine.js';
 import { botById } from './bots.js';
 import { loadOpenings, isBook, lookupOpening } from './openings.js';
-import { explainMove, mistakeReason, lineGain, evalWords, shiftWords, reasonList } from './explain.js';
+import { explainMove, mistakeReason, lineGain, evalWords, shiftWords, reasonList, bandWord } from './explain.js';
 import {
   CLASSES, BAD, SYM, CLASS_PHRASE, gradeMoves, gameAccuracy, partAccuracy, gameRating,
 } from './grading.js';
@@ -193,6 +193,62 @@ export function renderReview(view, param) {
 
   let moves = null;
 
+  // ---------- key moments ----------
+  const KEY = ['brilliant', 'great', 'miss', 'mistake', 'blunder'];
+
+  /** The turning points: up to six, the most important ones, shown in game order. */
+  function keyMoments() {
+    const weight = m => (m.cls === 'brilliant' ? 100 : m.cls === 'great' ? 40 : m.drop);
+    return moves.filter(m => KEY.includes(m.cls)).sort((a, b) => weight(b) - weight(a)).slice(0, 6).sort((a, b) => a.idx - b.idx);
+  }
+
+  /** What a key move did, in a few words, as [you-form, they-form]: ["lose a rook", "loses a rook"]. */
+  function momentWords(mm) {
+    const i = mm.idx, sign = mm.color === 'w' ? 1 : -1;
+    const opp = mm.color === 'w' ? 'b' : 'w';
+    const { best, pvAfter } = linesFor(mm);
+    const bestMv = mm.bestUci && tryMove(fens[i], mm.bestUci);
+    if (mm.cls === 'brilliant') return ['give up material, and it works', 'gives up material, and it works'];
+    if (mm.cls === 'great') return ['find the only good move', 'finds the only good move'];
+    if (mm.cls === 'miss') {
+      const g = lineGain(fens[i], best.lines?.[0]?.pv || [], mm.color, 4);
+      const tail = bestMv ? ` ${esc(bestMv.san)}${g.gain >= 1 ? `, which wins ${g.text}` : ''}` : ' the chance';
+      return [`miss${tail}`, `misses${tail}`];
+    }
+    if (sign * mm.cpAfter <= -MATE_CP) return ['allow a forced mate', 'allows a forced mate'];
+    const lost = lineGain(fens[i], [mm.lan, ...pvAfter], opp, 5);
+    if (lost.gain >= 1) return [`lose ${lost.text}`, `loses ${lost.text}`];
+    const from = bandWord(sign * data.review.cps[i]), to = bandWord(sign * mm.cpAfter);
+    return [`go from ${from} to ${to}`, `goes from ${from} to ${to}`];
+  }
+
+  /** One or two sentences on how the game went. */
+  function storyHtml(list) {
+    const worst = c => moves.filter(m => m.color === c && ['mistake', 'miss', 'blunder'].includes(m.cls)).sort((a, b) => b.drop - a.drop)[0];
+    const mine = worst(me), theirs = worst(them);
+    const named = m => `<b>${moveNo(m.idx)} ${esc(m.san)}</b>`;
+    let out;
+    if (mine && theirs && theirs.idx < mine.idx && mine.drop >= theirs.drop / 2) {
+      out = `${esc(bot.name)}'s ${named(theirs)} ${momentWords(theirs)[1]}, but then ${named(mine)}: you ${momentWords(mine)[0]}.`;
+    } else if (mine && (!theirs || mine.drop >= theirs.drop)) {
+      const sign = me === 'w' ? 1 : -1;
+      const state = bandWord(sign * data.review.cps[mine.idx]);
+      out = `${state === 'about equal' ? 'The game was about equal' : `You were ${state}`} until ${named(mine)}: you ${momentWords(mine)[0]}.`;
+    } else if (theirs) {
+      out = `The turning point was ${esc(bot.name)}'s ${named(theirs)}: it ${momentWords(theirs)[1]}.`;
+    } else out = 'A clean game: neither side made a big mistake.';
+    const proud = moves.filter(m => m.color === me && ['brilliant', 'great'].includes(m.cls)).sort((a, b) => (b.cls === 'brilliant') - (a.cls === 'brilliant'))[0];
+    if (proud) out += ` Your best moment: ${named(proud)}, ${CLASS_PHRASE[proud.cls]}.`;
+    return out;
+  }
+
+  function momentsHtml() {
+    const list = keyMoments();
+    const rows = list.map(m => `<button class="moment" data-ply="${m.idx + 1}"><span class="badge ${m.cls}">${SYM[m.cls]}</span>
+      <span class="mn">${moveNo(m.idx)} ${esc(m.san)}</span><span class="mw">${m.color === me ? 'You' : esc(bot.name)} ${momentWords(m)[m.color === me ? 0 : 1]}</span></button>`).join('');
+    return `<div class="moments"><div class="story">${storyHtml(list)}</div>${rows ? `<div class="small muted">Key moments</div>${rows}` : ''}</div>`;
+  }
+
   // ---------- report ----------
   const band = a => (a == null ? '' : a >= 90 ? 'best' : a >= 80 ? 'good' : a >= 65 ? 'inaccuracy' : a >= 50 ? 'mistake' : 'blunder');
   const fmtAcc = a => (a == null ? '–' : a.toFixed(1));
@@ -229,6 +285,7 @@ export function renderReview(view, param) {
         <div class="mid">${est(me)}</div><div class="lbl">Game rating</div><div class="mid">${est(them)}</div>
       </div>
       <svg class="graph" id="graph" preserveAspectRatio="none" role="img" aria-label="Who was better, move by move. Tap to jump there."></svg>
+      ${momentsHtml()}
       <div id="retrySlot">${deepLeft ? `<div class="small muted center">Double-checking key moves… ${deepLeft} to go</div>`
         : list.length ? `<button class="btn primary block" id="retryBtn">Learn from your mistakes (${list.length})</button>
         ${last ? `<div class="small muted center" style="margin-top:6px">Last time you found ${last.found} of ${last.total}</div>` : ''}` : ''}</div>
@@ -239,6 +296,7 @@ export function renderReview(view, param) {
       </div>`;
     const retryBtn = $('#retryBtn', view);
     if (retryBtn) retryBtn.addEventListener('click', () => startRetry(retryList()));
+    sum.querySelectorAll('.moment').forEach(b => b.addEventListener('click', () => startMoves(+b.dataset.ply)));
     drawGraph($('#graph', view));
   }
 
@@ -302,14 +360,23 @@ export function renderReview(view, param) {
   }
 
   /** Why `uci`, played instead of the best move in `mm`'s position, goes wrong. cpAfter is White's POV. */
-  function reasonFor(mm, uci, cpAfter, pvAfter) {
+  function reasonFor(mm, uci, cpAfter, pvAfter, { now = false } = {}) {
     const sign = mm.color === 'w' ? 1 : -1;
     const cpBefore = data.review.cps[mm.idx];
     return mistakeReason(mm.before, uci, {
       bestUci: mm.bestUci, pvBest: linesFor(mm).best.lines?.[0]?.pv, pvAfter,
       mateAgainst: sign * cpAfter <= -MATE_CP,
       hadMate: sign * cpBefore >= MATE_CP,
-    }) || shiftWords(sign * cpBefore, sign * cpAfter);
+      now, player: me,
+    }) || (mm.color === me ? shiftWords(sign * cpBefore, sign * cpAfter) : '');
+  }
+
+  /** "Best was Nc3: it develops your knight…", so a mistake with no tactic still says what was better. */
+  function betterWith(mm, best, bestLine) {
+    const r = explain(mm.idx, mm.bestUci, bestLine)?.reasons?.[0] || '';
+    const head = `Best was <b>${esc(best.san)}</b>`;
+    if (!r) return `${head}.`;
+    return r.startsWith('It ') ? `${head}: it ${r.slice(3)}` : `${head}. ${r}`;
   }
 
   function explain(i, uci, analysis) {
@@ -389,11 +456,12 @@ export function renderReview(view, param) {
       const reason = reasonFor(mm, mm.lan, mm.cpAfter, pvAfter);
       const reply = tryMove(fens[ply], pvAfter[0]); // their best answer to the move played
       if (reply) out.arrows.push(arrowOf(reply, 'red'));
+      const vague = !reason || reason.startsWith('It takes you');
       out.body = reason;
-      if (reply && (!reason || reason.startsWith('It takes you'))) out.body += ` Their best answer is <b>${esc(reply.san)}</b>.`;
+      if (reply && vague) out.body += ` Their best answer is <b>${esc(reply.san)}</b>.`;
       if (best) {
         out.arrows.push(arrowOf(best, 'green'));
-        out.body += ` Best was <b>${esc(best.san)}</b>.`;
+        out.body += ` ${vague ? betterWith(mm, best, bestLine) : `Best was <b>${esc(best.san)}</b>.`}`;
         // Other moves the engine rated close to its first choice.
         const close = others.map(l => ({ l, mv: tryMove(fens[i], l.move) }))
           .filter(x => x.mv && x.l.move !== mm.lan && pct(bestLine.score) - pct(x.l.score) < 7);
@@ -405,19 +473,22 @@ export function renderReview(view, param) {
       if (reply) out.acts.push({ label: '▶ Their reply', fn: () => openLine(fens[ply], pvAfter, `After ${mm.san}`) });
       if (deepLeft && !data.review.deep?.[i]) out.body += '<div class="small muted">Double-checking this move…</div>';
     } else if (BAD.includes(mm.cls)) {
-      // The bot slipped: what it offered the player.
-      out.body = best ? `Better was <b>${esc(best.san)}</b>.` : '';
-      if (best) out.arrows.push(arrowOf(best, 'green'));
+      // The bot slipped: why, and what it offered the player.
       const chance = tryMove(fens[ply], pvAfter[0]);
       const score = linesFor(mm).scoreAfter;
-      if (chance && score?.mate != null && Math.sign(score.mate) === -sign) {
+      const mates = chance && score?.mate != null && Math.sign(score.mate) === -sign;
+      const reason = mates ? '' : reasonFor(mm, mm.lan, mm.cpAfter, pvAfter, { now: true });
+      out.body = `${reason}${best ? ` Better was <b>${esc(best.san)}</b>.` : ''}`;
+      if (best) out.arrows.push(arrowOf(best, 'green'));
+      if (mates) {
         out.body += ` It let you force checkmate, starting with <b>${esc(chance.san)}</b> (blue arrow).`;
         out.arrows.push(arrowOf(chance, 'blue'));
         out.acts.push({ label: '▶ Show the mate', fn: () => openLine(fens[ply], pvAfter, `Mate after ${mm.san}`) });
       } else if (chance) {
         const g = lineGain(fens[ply], pvAfter, me, 4);
         if (g.gain >= 1) {
-          out.body += ` It gave you the chance to win ${g.text} with <b>${esc(chance.san)}</b> (blue arrow).`;
+          // The reason may already tell the line; the arrow and the button still show it.
+          if (!reason.includes(esc(chance.san))) out.body += ` It gave you the chance to win ${g.text} with <b>${esc(chance.san)}</b> (blue arrow).`;
           out.arrows.push(arrowOf(chance, 'blue'));
           out.acts.push({ label: '▶ How to punish it', fn: () => openLine(fens[ply], pvAfter, `Punishing ${mm.san}`) });
         }
