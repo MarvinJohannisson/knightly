@@ -35,11 +35,13 @@ export class Board {
 
     this.root = document.createElement('div');
     this.root.className = 'board';
-    this.root.innerHTML = '<div class="squares"></div><div class="pieces"></div><svg class="arrows" viewBox="0 0 8 8"></svg>';
+    this.root.innerHTML = '<div class="squares"></div><div class="pieces"></div><svg class="arrows" viewBox="0 0 8 8"></svg><div class="badges"></div>';
     container.appendChild(this.root);
     this.sqLayer = this.root.querySelector('.squares');
     this.pcLayer = this.root.querySelector('.pieces');
     this.arrowLayer = this.root.querySelector('.arrows');
+    this.badgeLayer = this.root.querySelector('.badges');
+    this.badge = null;
     this._buildSquares();
     this._bindInput();
   }
@@ -97,6 +99,7 @@ export class Board {
     this._buildSquares();
     for (const [sq, elx] of Object.entries(this.pieces)) this._place(elx, sq, false);
     this.renderArrows();
+    this.setBadge(this.badge);
   }
   flip() { this.setOrientation(this.orientation === 'w' ? 'b' : 'w'); }
 
@@ -153,6 +156,14 @@ export class Board {
   }
 
   setMarks(marks = {}) { this.marks = marks; this._paintSquares(); }
+
+  /** A move grade on a square's corner: {square, cls, sym}, or null to clear it. */
+  setBadge(b) {
+    this.badge = b;
+    if (!b) { this.badgeLayer.innerHTML = ''; return; }
+    const [x, y] = this._xy(b.square);
+    this.badgeLayer.innerHTML = `<div class="badge-cell" style="transform:translate(${x * 100}%, ${y * 100}%)"><span class="badge ${b.cls}">${b.sym}</span></div>`;
+  }
 
   /** arrows: [{from, to, color}] */
   setArrows(arrows = []) { this.arrows = arrows; this.renderArrows(); }

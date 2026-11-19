@@ -1,7 +1,7 @@
 // Play vs bots: setup screen + game screen with coach, hints and takebacks.
 import { Chess } from '../vendor/chess.js';
 import { Board, destsFrom, checkSquare } from './board.js';
-import { engine } from './engine.js';
+import { engine, analyser } from './engine.js';
 import { BOTS, botById, botMove, thinkTime } from './bots.js';
 import { loadOpenings, lookupOpening, isBook } from './openings.js';
 import {
@@ -367,7 +367,7 @@ export function renderGame(view) {
     if (s.coach || s.evalBar) {
       const g = st.gen;
       const ply = chess.history().length;
-      st.turnAnalysis = engine.analyse(chess.fen(), { depth: COACH_DEPTH }).then(r => {
+      st.turnAnalysis = analyser.analyse(chess.fen(), { depth: COACH_DEPTH }).then(r => {
         if (g === st.gen && !r.cancelled && r.score) { data.evals[ply] = r.score; renderEval(); }
         return r;
       });
@@ -406,7 +406,7 @@ export function renderGame(view) {
       if (g !== st.gen) return;
       // After a hint or comparison the position was searched deeper, so the reply gets a deeper look too.
       const deep = (before?.lines?.[0]?.depth || 0) > COACH_DEPTH + 1;
-      const after = await engine.analyse(chess.fen(), deep ? WHATIF : { depth: COACH_DEPTH });
+      const after = await analyser.analyse(chess.fen(), deep ? WHATIF : { depth: COACH_DEPTH });
       if (g !== st.gen || after.cancelled) return;
       if (after.score) data.evals[ply] = after.score;
       renderEval();
@@ -513,7 +513,7 @@ export function renderGame(view) {
   function undo() {
     if (st.sandbox) { sandboxBack(); return; }
     if (!chess.history().length) return;
-    engine.stop();
+    stopEngines();
     st.gen++;
     st.thinking = false;
     do { chess.undo(); } while (chess.history().length > 0 && chess.turn() !== data.playerColor);
@@ -580,7 +580,7 @@ export function renderGame(view) {
   /** The engine's view of the current game position, reusing this turn's analysis when it finished. */
   async function positionAnalysis() {
     const r = st.turnAnalysis ? await st.turnAnalysis : null;
-    return r && !r.cancelled && r.bestmove ? r : engine.analyse(chess.fen(), { depth: COACH_DEPTH });
+    return r && !r.cancelled && r.bestmove ? r : analyser.analyse(chess.fen(), { depth: COACH_DEPTH });
   }
 
   /**
@@ -591,7 +591,7 @@ export function renderGame(view) {
     const fen = chess.fen();
     if (st.help?.fen !== fen) {
       const entry = { fen }, ply = chess.history().length;
-      entry.promise = engine.analyse(fen, HELP).then(r => {
+      entry.promise = analyser.analyse(fen, HELP).then(r => {
         if (r.cancelled || !r.bestmove) { if (st.help === entry) st.help = null; }
         else if (st.help === entry && chess.fen() === fen) { st.turnAnalysis = Promise.resolve(r); data.evals[ply] = r.score; renderEval(); }
         return r;
@@ -650,7 +650,7 @@ export function renderGame(view) {
     setCoach('Looking at what happens…');
     renderAll([move.from, move.to]);
     const over = sb.chess.isGameOver();
-    const after = over ? null : await engine.analyse(sb.chess.fen(), WHATIF);
+    const after = over ? null : await analyser.analyse(sb.chess.fen(), WHATIF);
     if (st.sandbox !== sb) return;
     let shown = { html: 'The engine could not look at this position.', arrows: [] };
     try { shown = whatIfMove(fenBefore, move.lan, sb.steps.at(-1).analysis, after, data.playerColor); } catch (e) { console.error('what if failed', e); }
@@ -682,7 +682,7 @@ export function renderGame(view) {
     if (sb) { sb.busy = true; renderBoard(lastMoveSquares(), false); renderControls(); }
     setCoach('Comparing the top moves…');
     // The game position shares its analysis with the hint, so both name the same best move.
-    const r = await (fen === chess.fen() ? helpAnalysis() : engine.analyse(fen, HELP)).finally(() => { st.asking = false; });
+    const r = await (fen === chess.fen() ? helpAnalysis() : analyser.analyse(fen, HELP)).finally(() => { st.asking = false; });
     if (st.sandbox !== sb || pos().fen() !== fen) return;
     if (r.cancelled || !r.lines.length) { if (sb) showSandboxStep(); else setCoach('The comparison is not ready. Tap Hint to try again.'); return; }
     const shown = compareMoves(fen, r, data.playerColor, c.history({ verbose: true }).at(-1) || null);
@@ -704,18 +704,18 @@ export function renderGame(view) {
     if (data.result) { location.hash = '#/play'; return; }
     const ok = await confirmBox('Resign?', `<p class="muted">${isWhatIf() ? 'You chose moves for the bot, so this game does not count in your stats.' : 'The game will count as a loss.'}</p>`, 'Resign');
     if (ok && !data.result) {
-      engine.stop(); st.gen++; st.thinking = false;
+      stopEngines(); st.gen++; st.thinking = false;
       finish({ winner: data.playerColor === 'w' ? 'b' : 'w', reason: 'resignation' });
       renderAll(lastMoveSquares(), false);
     }
   });
 
   // ---------- start ----------
-  function destroy() { st.destroyed = true; st.gen++; st.sandbox = null; engine.stop(); }
+  function destroy() { st.destroyed = true; st.gen++; st.sandbox = null; stopEngines(); }
 
   renderAll(lastMoveSquares(), false);
   loadOpenings().then(() => { if (!st.destroyed) renderOpening(); });
-  engine.init().catch(() => toast('Could not start the chess engine'));
+  Promise.all([engine.init(), analyser.init()]).catch(() => toast('Could not start the chess engine'));
 
   if (data.result) {
     const r = data.result;
@@ -725,7 +725,7 @@ export function renderGame(view) {
     setCoach(data.playerColor === 'w'
       ? `You have the white pieces. ${pick(OPENING_TIPS)}`
       : `You have the black pieces. ${esc(bot.name)} moves first.`);
-    engine.newGame();
+    engine.newGame(); analyser.newGame();
     if (chess.turn() !== data.playerColor) botTurn(); else startPlayerTurn();
   } else {
     setCoach(chess.turn() === data.playerColor ? 'Welcome back! Your move.' : 'Welcome back!');
@@ -737,6 +737,9 @@ export function renderGame(view) {
 
 const COMPARE_LINK = '<div class="coach-acts"><button data-act="compare">Compare top moves</button></div>';
 const ASK_LINKS = '<div class="coach-acts"><button data-act="whatif">What if…?</button><button data-act="compare">Compare top moves</button></div>';
+
+/** The bot's engine plays, the analyser coaches; both stop together. */
+function stopEngines() { engine.stop(); if (analyser !== engine) analyser.stop(); }
 
 const OPENING_TIPS = [
   'Start by taking the center with a pawn (e4 or d4).',

@@ -165,14 +165,25 @@ async function run() {
   await go('#/review');
   const sum = await waitFor(() => D().querySelector('#graph') && D().querySelector('#summary').textContent + D().querySelector('#details').textContent, 30000);
   log(!!sum, 'review summary: ' + (sum || '').replace(/\s+/g, ' ').slice(0, 120));
-  log(/Blunder/.test(sum || ''), 'review flags blunders');
+  log(!!D().querySelector('#details .c.blunder'), 'review flags blunders');
+  log(/Accuracy/.test(sum || '') && !D().querySelector('#summary').hidden && D().querySelector('#stage').hidden, 'review opens on the report');
   D().querySelector('#nextMistake').click(); // 1.f3 is graded too now
   await sleep(100);
-  log(/You played 1. f3/.test(D().querySelector('#comment').textContent), 'a dubious opening is graded, not book');
+  log(/1\. f3 is/.test(D().querySelector('#comment').textContent) && D().querySelector('#summary').hidden, 'a dubious opening is graded, not book');
   D().querySelector('#nextMistake').click();
   await sleep(200);
   const why = D().querySelector('#comment');
   log(/forced checkmate/.test(why.textContent) && !!why.querySelector('.why li'), 'review explains the mistake: ' + why.textContent.replace(/\s+/g, ' ').slice(0, 120));
+  log(!!D().querySelector('.board .badge.mistake, .board .badge.blunder') && !D().querySelector('#evalBar').hidden, 'the grade sits on the moved piece, next to the eval bar');
+  const actBtn = label => [...D().querySelectorAll('#comment .coach-acts button')].find(b => b.textContent.includes(label));
+  actBtn('Why').click();
+  log(!D().querySelector('#comment .why-box').hidden, 'Why? opens the reasons');
+  actBtn('Their reply').click();
+  await sleep(1100);
+  log(!!D().querySelector('#comment .line-moves .mv.cur') && /Qh4#/.test(D().querySelector('#comment').textContent), 'their reply plays out on the board: ' + D().querySelector('#comment').textContent.replace(/\s+/g, ' ').slice(0, 60));
+  actBtn('Back to the game').click();
+  await sleep(100);
+  log(/2\. g4 is/.test(D().querySelector('#comment').textContent), 'back from the line to the game move');
 
   // ---------- learn from your mistakes ----------
   const comment = () => D().querySelector('#comment').textContent;
