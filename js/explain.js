@@ -673,8 +673,8 @@ export function whatIfMove(fen, uci, before, after, me) {
     else {
       text += `${san} is weaker than ${bestSan}. ` + (mistakeReason(fen, uci, {
         bestUci: before.bestmove, replyUci: after.bestmove, pvBest: before.lines?.[0]?.pv, pvAfter: pv,
-        mateAgainst: after.score.mate != null && Math.sign(after.score.mate) === -sign,
-        hadMate: before.score.mate != null && Math.sign(before.score.mate) === sign,
+        mateAgainst: after.score?.mate != null && Math.sign(after.score.mate) === -sign,
+        hadMate: before.score?.mate != null && Math.sign(before.score.mate) === sign,
       }) || shiftWords(sign * scoreToCp(before.score), sign * scoreToCp(after.score)));
     }
     if (reply) text += ` Their best reply is <b>${esc(reply.san)}</b>.`;
@@ -702,7 +702,7 @@ export function compareMoves(fen, analysis, me, prev = null) {
   if (!lines.length) return { html: 'No moves to compare here.', arrows: [] };
 
   const pct = l => winPct(sign * scoreToCp(l.score));
-  const mates = l => (l.score.mate != null && Math.sign(l.score.mate) === sign ? Math.abs(l.score.mate) : 0);
+  const mates = l => (l.score?.mate != null && Math.sign(l.score.mate) === sign ? Math.abs(l.score.mate) : 0);
   const top = lines[0];
   // A slower or missed mate is a step down even when the winning chances look the same.
   const gapOf = l => Math.max(pct(top) - pct(l), mates(top) && !mates(l) ? 2 : 0);
@@ -712,12 +712,13 @@ export function compareMoves(fen, analysis, me, prev = null) {
   const whose = mine ? '' : ' for them';
   const level = lines.filter(l => gapOf(l) < 2);
   const summary = c.moves().length === 1 ? `${topSan} is the only legal move.`
-    : mates(top) && lines[1] && !mates(lines[1]) ? `${topSan} forces checkmate${whose}. Nothing else does.`
-      : gap >= 14 ? `${topSan} is the only good move${whose}: everything else is clearly worse.`
-        : gap >= 7 ? `${topSan} clearly stands out${whose}.`
-          : gap >= 2 ? `${topSan} is a little better than the alternatives${whose}.`
-            : level.length > 2 ? `These moves are all about equally good${whose}, so pick the plan you like best.`
-              : `${topSan} and ${b(lines[1].m.san)} are about equally good${whose}.`;
+    : lines.length === 1 ? `${topSan} is the top engine move${whose}.`
+      : mates(top) && !mates(lines[1]) ? `${topSan} forces checkmate${whose}. Nothing else does.`
+        : gap >= 14 ? `${topSan} is the only good move${whose}: everything else is clearly worse.`
+          : gap >= 7 ? `${topSan} clearly stands out${whose}.`
+            : gap >= 2 ? `${topSan} is a little better than the alternatives${whose}.`
+              : level.length > 2 ? `These moves are all about equally good${whose}, so pick the plan you like best.`
+                : `${topSan} and ${b(lines[1].m.san)} are about equally good${whose}.`;
 
   const rows = lines.map((l, i) => {
     const cls = classify(gapOf(l), i === 0);
@@ -726,7 +727,7 @@ export function compareMoves(fen, analysis, me, prev = null) {
     if (i > 0 && ((cls !== 'best' && cls !== 'good') || (mates(top) && !mates(l)))) {
       note = mistakeReason(fen, l.move, {
         bestUci: top.move, replyUci: l.pv[1], pvBest: top.pv, pvAfter: l.pv.slice(1), now: true, player: me,
-        mateAgainst: l.score.mate != null && Math.sign(l.score.mate) === -sign,
+        mateAgainst: l.score?.mate != null && Math.sign(l.score.mate) === -sign,
         hadMate: !!mates(top) && !mates(l),
       });
     }

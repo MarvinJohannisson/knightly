@@ -18,6 +18,8 @@ export class Engine {
     this.current = null;
     this.readyPromise = null;
     this.opts = {};
+    this.stopGen = 0;
+    this._pendingNewGame = false;
   }
 
   init() {
@@ -25,16 +27,35 @@ export class Engine {
     this.readyPromise = new Promise((resolve, reject) => {
       try {
         this.worker = new Worker(new URL('../vendor/' + this.file(), import.meta.url));
-      } catch (e) { reject(e); return; }
+      } catch (e) { this.readyPromise = null; reject(e); return; }
       this._onReady = resolve;
+      this._onReadyReject = reject;
       this.worker.onmessage = e => this._line(String(e.data));
-      this.worker.onerror = e => console.error('Engine error', e);
+      this.worker.onerror = e => this._fail(e);
       this._send('uci');
     });
     return this.readyPromise;
   }
 
-  _send(cmd) { this.worker.postMessage(cmd); }
+  _fail(err) {
+    console.error('Engine error', err);
+    const rej = this._onReadyReject;
+    this._onReady = null;
+    this._onReadyReject = null;
+    this.readyPromise = null;
+    this.opts = {};
+    this._pendingNewGame = false;
+    if (this.worker) { try { this.worker.terminate(); } catch { } this.worker = null; }
+    const cur = this.current;
+    this.current = null;
+    const queued = this.queue;
+    this.queue = [];
+    if (cur) cur.resolve({ bestmove: null, lines: [], score: null, cancelled: true });
+    for (const job of queued) job.resolve({ bestmove: null, lines: [], score: null, cancelled: true });
+    if (rej) rej(err);
+  }
+
+  _send(cmd) { if (this.worker) this.worker.postMessage(cmd); }
 
   _setOption(name, value) {
     if (this.opts[name] === value) return;
@@ -45,7 +66,13 @@ export class Engine {
   _line(line) {
     if (line === 'uciok') { this._send(`setoption name Hash value ${this.hash}`); this._send('isready'); return; }
     if (line === 'readyok') {
-      if (this._onReady) { this._onReady(); this._onReady = null; this._next(); }
+      if (this._onReady) {
+        const done = this._onReady;
+        this._onReady = null;
+        this._onReadyReject = null;
+        done();
+        this._next();
+      }
       return;
     }
     const job = this.current;
@@ -64,7 +91,7 @@ export class Engine {
       }
       const pv = tok.slice(tok.indexOf('pv') + 1);
       job.lines[multipv - 1] = { multipv, depth, score, pv, move: pv[0] };
-      if (job.onInfo && multipv === 1) job.onInfo(job.lines[0]);
+      if (job.onInfo && !job.cancelled && multipv === 1) job.onInfo(job.lines[0]);
       // While a depth is being searched, the lines are a mix of this depth and the last one, and
       // a move can show up twice. Keep the last set in which every line comes from one depth.
       const set = job.lines.filter(Boolean);
@@ -87,7 +114,12 @@ export class Engine {
   }
 
   _next() {
-    if (this.current || this._onReady || !this.queue.length) return;
+    if (this.current || this._onReady || !this.worker) return;
+    if (this._pendingNewGame) {
+      this._pendingNewGame = false;
+      this._send('ucinewgame');
+    }
+    if (!this.queue.length) return;
     const job = this.queue.shift();
     this.current = job;
     this._setOption('Skill Level', job.skill ?? 20);
@@ -106,20 +138,29 @@ export class Engine {
 
   /** analyse(fen, {depth, movetime, multipv, skill, onInfo}) -> Promise<{bestmove, score, lines, cancelled}> */
   analyse(fen, opts = {}) {
-    return this.init().then(() => new Promise(resolve => {
-      this.queue.push({ ...opts, fen, resolve, lines: [], whole: [], blackToMove: fen.split(' ')[1] === 'b' });
-      this._next();
-    }));
+    const gen = this.stopGen;
+    return this.init().then(() => {
+      if (gen !== this.stopGen) return { bestmove: null, lines: [], score: null, cancelled: true };
+      return new Promise(resolve => {
+        this.queue.push({ ...opts, fen, resolve, lines: [], whole: [], blackToMove: fen.split(' ')[1] === 'b' });
+        this._next();
+      });
+    });
   }
 
   /** Cancel all pending work. Pending promises resolve with cancelled: true. */
   stop() {
+    this.stopGen++;
     for (const job of this.queue) job.resolve({ bestmove: null, lines: [], score: null, cancelled: true });
     this.queue = [];
-    if (this.current) { this.current.cancelled = true; this._send('stop'); }
+    if (this.current && !this.current.cancelled) { this.current.cancelled = true; this._send('stop'); }
   }
 
-  newGame() { if (this.worker) this._send('ucinewgame'); }
+  newGame() {
+    if (!this.worker || this._onReady) return;
+    if (this.current) this._pendingNewGame = true;
+    else this._send('ucinewgame');
+  }
 }
 
 export const engine = new Engine();

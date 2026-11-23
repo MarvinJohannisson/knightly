@@ -106,8 +106,22 @@ function newGameData(botId, playerColor) {
 
 // ======================= Game screen =======================
 export function renderGame(view) {
+  let innerCleanup = null;
+  function start(botId, color) {
+    if (botId) {
+      store.set('game', newGameData(botId, color));
+      store.set('lastBot', botId);
+    }
+    if (innerCleanup) { innerCleanup(); innerCleanup = null; }
+    innerCleanup = mountGame(view, start) || null;
+  }
+  start();
+  return () => { if (innerCleanup) { innerCleanup(); innerCleanup = null; } };
+}
+
+function mountGame(view, onStartNew) {
   const data = store.get('game', null);
-  if (!data) { location.hash = '#/play'; return; }
+  if (!data) { location.hash = '#/play'; return null; }
   const settings = getSettings();
   const bot = botById(data.botId);
   const chess = new Chess();
@@ -127,13 +141,36 @@ export function renderGame(view) {
     coachHtml: '', coachTag: '', destroyed: false,
     sandbox: null, // the "What if?" board: a scratch position that never touches the game
     asking: false,
+    viewPly: null, // null = live game; 0..N-1 = viewing an earlier move
+    liveArrows: [],
+    liveMarks: {},
   };
-  const pos = () => (st.sandbox ? st.sandbox.chess : chess);
+  const browsing = () => !st.sandbox && st.viewPly != null;
+  const shownPly = () => (browsing() ? st.viewPly : chess.history().length);
+  const verboseHist = () => chess.history({ verbose: true });
+  const moveAt = ply => (ply > 0 ? verboseHist()[ply - 1] || null : null);
+  function fenAt(ply) {
+    const h = verboseHist();
+    if (ply <= 0) return h.length ? h[0].before : chess.fen();
+    return h[ply - 1] ? h[ply - 1].after : chess.fen();
+  }
+  function chessAt(ply) {
+    const h = verboseHist();
+    return ply >= h.length ? chess : new Chess(fenAt(ply));
+  }
+  const pos = () => (st.sandbox ? st.sandbox.chess : browsing() ? chessAt(st.viewPly) : chess);
 
   view.innerHTML = `
     <div class="player-bar" id="oppBar"></div>
     <div class="board-wrap" id="boardWrap"><div class="evalbar" id="evalBar" ${settings.evalBar ? '' : 'hidden'}><div class="fill"></div><div class="num"></div></div></div>
     <div class="player-bar" id="meBar"></div>
+    <div class="hist-bar" id="histBar">
+      <button class="hist-btn" id="histPrev" type="button" aria-label="Previous move">◀</button>
+      <div class="hist-scrub"><input type="range" id="histRange" min="0" max="0" value="0" step="1" aria-label="Move history"></div>
+      <span class="hist-pos" id="histPos">0/0</span>
+      <button class="hist-btn" id="histNext" type="button" aria-label="Next move">▶</button>
+      <button class="hist-btn live" id="histLive" type="button">Live</button>
+    </div>
     <div class="coach" id="coach"><div class="avatar">🎓</div><div class="grow"><div class="msg" id="coachMsg"></div><div class="opening" id="openingName"></div></div></div>
     <div class="moves" id="moves" ${settings.moveList ? '' : 'hidden'}></div>
     <div class="controls bottom-bar">
@@ -152,6 +189,8 @@ export function renderGame(view) {
 
   // ---------- rendering ----------
   function sans() { return chess.history(); }
+  function setLiveArrows(a) { st.liveArrows = a; if (!browsing()) board.setArrows(a); }
+  function setLiveMarks(m) { st.liveMarks = m; if (!browsing()) board.setMarks(m); }
 
   function material() {
     const counts = { w: { p: 0, n: 0, b: 0, r: 0, q: 0 }, b: { p: 0, n: 0, b: 0, r: 0, q: 0 } };
@@ -190,6 +229,27 @@ export function renderGame(view) {
     $('#meBar', view).innerHTML = topIsBot ? meHtml : botHtml;
   }
 
+  function renderHistBar() {
+    const bar = $('#histBar', view);
+    bar.hidden = !!st.sandbox;
+    if (bar.hidden) return;
+    const n = chess.history().length;
+    const shown = shownPly();
+    const live = !browsing();
+    bar.classList.toggle('browsing', !live);
+    const range = $('#histRange', view);
+    range.max = String(n);
+    range.value = String(shown);
+    range.disabled = n === 0;
+    range.style.setProperty('--pct', n ? `${(shown / n) * 100}%` : '0%');
+    $('#histPrev', view).disabled = n === 0 || shown <= 0;
+    $('#histNext', view).disabled = n === 0 || live;
+    const liveBtn = $('#histLive', view);
+    liveBtn.disabled = live;
+    liveBtn.classList.toggle('on', !live);
+    $('#histPos', view).textContent = `${shown}/${n}`;
+  }
+
   function renderMoves() {
     const mv = $('#moves', view);
     if (st.sandbox) {
@@ -199,6 +259,7 @@ export function renderGame(view) {
       return;
     }
     const hist = chess.history();
+    const shown = shownPly();
     let html = '';
     for (let i = 0; i < hist.length; i++) {
       if (i % 2 === 0) html += `<span class="num">${i / 2 + 1}.</span>`;
@@ -206,17 +267,19 @@ export function renderGame(view) {
       const picked = data.picked[i + 1] ? 'picked' : '';
       const sym = mk === 'blunder' ? '??' : mk === 'mistake' ? '?' : mk === 'inaccuracy' ? '?!' : '';
       const col = mk ? `style="color:var(--${mk === 'inaccuracy' ? 'inacc' : mk})"` : '';
-      html += `<span class="mv ${i === hist.length - 1 ? 'cur' : ''} ${picked}" ${col}>${esc(hist[i])}<span class="sym">${sym}</span></span>`;
+      html += `<span class="mv ${i + 1 === shown ? 'cur' : ''} ${picked}" data-ply="${i + 1}" ${col}>${esc(hist[i])}<span class="sym">${sym}</span></span>`;
     }
     mv.innerHTML = html;
-    mv.scrollLeft = mv.scrollWidth;
+    const curEl = mv.querySelector('.cur');
+    if (curEl) mv.scrollLeft = Math.max(0, curEl.offsetLeft - mv.clientWidth / 2 + curEl.offsetWidth / 2);
+    else mv.scrollLeft = 0;
   }
 
   function renderEval() {
     const bar = $('#evalBar', view);
     bar.hidden = !getSettings().evalBar;
     if (bar.hidden) return;
-    const ply = chess.history().length;
+    const ply = shownPly();
     let s = data.evals[ply];
     for (let p = ply; s == null && p >= 0; p--) s = data.evals[p];
     if (st.sandbox) s = st.sandbox.steps.findLast(x => x.analysis?.score)?.analysis.score ?? s;
@@ -234,21 +297,53 @@ export function renderGame(view) {
   }
 
   function renderOpening() {
-    const o = st.sandbox ? null : lookupOpening(sans());
+    const o = st.sandbox ? null : lookupOpening(sans().slice(0, shownPly()));
     $('#openingName', view).textContent = o ? `${o.eco} · ${o.name}` : '';
+  }
+
+  function bindCoachActs() {
+    const acts = {
+      takeback: undo, whatif: openSandbox, compare: compareTop, why: whyBest,
+      live: () => goHistory(chess.history().length),
+    };
+    for (const a of view.querySelectorAll('#coachMsg [data-act]')) {
+      a.addEventListener('click', () => acts[a.dataset.act]?.());
+    }
   }
 
   function setCoach(html) {
     st.coachHtml = html;
+    if (browsing()) return;
     $('#coachMsg', view).innerHTML = html;
-    const acts = { takeback: undo, whatif: openSandbox, compare: compareTop, why: whyBest };
-    for (const a of view.querySelectorAll('#coachMsg [data-act]')) a.addEventListener('click', () => acts[a.dataset.act]());
+    bindCoachActs();
+  }
+
+  function renderLiveCoach() {
+    $('#coachMsg', view).innerHTML = st.coachHtml;
+    bindCoachActs();
+  }
+
+  function renderBrowseCoach() {
+    const n = chess.history().length;
+    const ply = st.viewPly;
+    const m = moveAt(ply);
+    let html;
+    if (!m) {
+      html = `<b>Starting position</b> <span class="muted">· 0/${n}</span>`;
+    } else {
+      const no = `${Math.ceil(ply / 2)}.${m.color === 'b' ? '..' : ''}`;
+      const mk = data.marks[ply];
+      const tag = mk ? `<span class="tag ${mk}">${CLASS_LABEL[mk]}</span> ` : '';
+      html = `${tag}<b>${no} ${esc(m.san)}</b> <span class="muted">· move ${ply} of ${n}</span>`;
+    }
+    $('#coachMsg', view).innerHTML = `${html}<div class="coach-acts"><button data-act="live">Back to live</button></div>`;
+    bindCoachActs();
   }
 
   function renderControls() {
     const over = !!data.result;
     const sb = st.sandbox;
-    const myTurn = !over && !st.thinking && chess.turn() === data.playerColor;
+    const myTurn = !over && !st.thinking && !browsing() && chess.turn() === data.playerColor;
     $('#hintBtn', view).disabled = !!sb || !myTurn;
     $('#undoBtn', view).disabled = sb ? sb.busy || sb.steps.length < 2
       : chess.history().length === 0 || (data.playerColor === 'b' && chess.history().length <= 1);
@@ -268,17 +363,58 @@ export function renderGame(view) {
     const c = pos();
     board.setPosition(c.fen(), { lastMove, check: checkSquare(c), animate });
     if (st.sandbox) { board.setMovable(st.sandbox.busy || c.isGameOver() ? null : c.turn(), destsFrom(c)); return; }
+    if (browsing()) { board.setMovable(null); return; }
     const myTurn = !data.result && chess.turn() === data.playerColor && !st.thinking;
     board.setMovable(myTurn ? data.playerColor : null, destsFrom(chess));
   }
 
   function renderAll(lastMove, animate) {
-    renderBoard(lastMove, animate); renderBars(); renderMoves(); renderEval(); renderOpening(); renderControls();
+    renderBoard(lastMove, animate); renderBars(); renderHistBar(); renderMoves(); renderEval(); renderOpening(); renderControls();
   }
 
   function lastMoveSquares() {
-    const m = pos().history({ verbose: true }).at(-1);
+    if (st.sandbox) {
+      const m = st.sandbox.chess.history({ verbose: true }).at(-1);
+      return m ? [m.from, m.to] : null;
+    }
+    const m = moveAt(shownPly());
     return m ? [m.from, m.to] : null;
+  }
+
+  // ---------- history browsing ----------
+  function goHistory(ply, { animate = true, playSound = true } = {}) {
+    if (st.sandbox) return;
+    const n = chess.history().length;
+    if (!n) return;
+    const target = Math.max(0, Math.min(n, ply));
+    const prev = shownPly();
+    if (target === prev) return;
+    const wasBrowsing = browsing();
+    if (target === n) {
+      st.viewPly = null;
+      board.setArrows(st.liveArrows);
+      board.setMarks(st.liveMarks);
+      renderLiveCoach();
+      renderAll(lastMoveSquares(), animate);
+      if (playSound && target === prev + 1) {
+        const m = moveAt(target);
+        if (m) sound.forMove(m, chess);
+      }
+      return;
+    }
+    if (!wasBrowsing) {
+      st.liveArrows = board.arrows;
+      st.liveMarks = board.marks;
+    }
+    st.viewPly = target;
+    board.setArrows([]);
+    board.setMarks({});
+    renderAll(lastMoveSquares(), animate);
+    renderBrowseCoach();
+    if (playSound && target > 0 && target === prev + 1) {
+      const m = moveAt(target);
+      if (m) sound.forMove(m, chessAt(target));
+    }
   }
 
   // A game with chosen bot moves is an experiment, so it never counts in the stats.
@@ -300,6 +436,12 @@ export function renderGame(view) {
 
   function finish(r) {
     data.result = r;
+    const wasBrowsing = browsing();
+    if (wasBrowsing) {
+      st.viewPly = null;
+      board.setArrows(st.liveArrows);
+      board.setMarks(st.liveMarks);
+    }
     board.setMovable(null);
     const whatIf = isWhatIf();
     const helped = data.takebacks + data.hints > 0;
@@ -321,7 +463,8 @@ export function renderGame(view) {
       store.set('archive', archive.slice(0, 10));
     }
     save();
-    renderControls();
+    if (wasBrowsing) renderAll(lastMoveSquares(), false);
+    else { renderHistBar(); renderControls(); }
     sound.play('end');
     const won = r.winner === data.playerColor;
     const cleanWin = won && !whatIf && !helped;
@@ -345,22 +488,18 @@ export function renderGame(view) {
           { label: 'Close', cls: 'ghost', value: null },
         ],
       });
+      if (st.destroyed) return;
       if (v === 'review') location.hash = '#/review';
       else if (v === 'rematch') startNew(bot.id, data.playerColor === 'w' ? 'b' : 'w');
       else if (v === 'next') startNew(BOTS[BOTS.indexOf(bot) + 1].id, data.playerColor);
     }, 700);
   }
 
-  function startNew(botId, color) {
-    store.set('game', newGameData(botId, color));
-    store.set('lastBot', botId);
-    destroy();
-    renderGame(view);
-  }
+  function startNew(botId, color) { onStartNew(botId, color); }
 
   function startPlayerTurn() {
     st.hint = null; st.help = null; st.helped = false;
-    board.setMarks({});
+    setLiveMarks({});
     renderBoard(lastMoveSquares(), false);
     renderControls();
     const s = getSettings();
@@ -368,26 +507,29 @@ export function renderGame(view) {
       const g = st.gen;
       const ply = chess.history().length;
       st.turnAnalysis = analyser.analyse(chess.fen(), { depth: COACH_DEPTH }).then(r => {
-        if (g === st.gen && !r.cancelled && r.score) { data.evals[ply] = r.score; renderEval(); }
+        if (!st.destroyed && g === st.gen && !r.cancelled && r.score) { data.evals[ply] = r.score; renderEval(); }
         return r;
-      });
+      }).catch(() => ({ bestmove: null, lines: [], score: null, cancelled: true }));
     } else st.turnAnalysis = null;
   }
 
   async function onUserMove(from, to) {
     if (st.sandbox) return sandboxMove(from, to);
+    if (browsing()) return;
+    const g = st.gen;
     const piece = chess.get(from);
     let promotion;
     if (piece && piece.type === 'p' && (to[1] === '8' || to[1] === '1')) {
       promotion = getSettings().autoQueen ? 'q' : await board.promote(piece.color);
+      if (st.destroyed || g !== st.gen) return;
       if (!promotion) { renderBoard(lastMoveSquares(), false); return; }
     }
     let move;
     const fenBefore = chess.fen();
     try { move = chess.move({ from, to, promotion }); } catch { renderBoard(lastMoveSquares(), false); return; }
     sound.forMove(move, chess);
-    board.setArrows([]);
-    board.setMarks({});
+    setLiveArrows([]);
+    setLiveMarks({});
     renderAll([move.from, move.to]);
     save();
     if (checkEnd()) return;
@@ -403,11 +545,12 @@ export function renderGame(view) {
 
     if (s.coach || s.evalBar) {
       const before = st.turnAnalysis ? await st.turnAnalysis : null;
-      if (g !== st.gen) return;
+      if (st.destroyed || g !== st.gen) return;
       // After a hint or comparison the position was searched deeper, so the reply gets a deeper look too.
       const deep = (before?.lines?.[0]?.depth || 0) > COACH_DEPTH + 1;
-      const after = await analyser.analyse(chess.fen(), deep ? WHATIF : { depth: COACH_DEPTH });
-      if (g !== st.gen || after.cancelled) return;
+      const after = await analyser.analyse(chess.fen(), deep ? WHATIF : { depth: COACH_DEPTH })
+        .catch(() => ({ bestmove: null, lines: [], score: null, cancelled: true }));
+      if (st.destroyed || g !== st.gen || after.cancelled) return;
       if (after.score) data.evals[ply] = after.score;
       renderEval();
       if (s.coach) {
@@ -467,7 +610,7 @@ export function renderGame(view) {
       text = bestMove && said.includes(bestSan) ? said : `${said} ${bestSan} ${better}.${idea}`.trim();
       acts = `<div class="coach-acts"><button data-act="takeback">Take back</button>${bestMove ? `<button data-act="why">Why ${esc(bestMove.san)}?</button>` : ''}</div>`;
       if (bestMove) {
-        board.setArrows([{ from: bestMove.from, to: bestMove.to, color: 'green' }]);
+        setLiveArrows([{ from: bestMove.from, to: bestMove.to, color: 'green' }]);
         st.why = { fen: fenBefore, uci: bestUci, analysis: before, prev };
       }
     }
@@ -493,7 +636,7 @@ export function renderGame(view) {
     board.setMovable(null);
     const t0 = Date.now();
     const info = {};
-    const uci = await botMove(bot, chess, engine, info);
+    const uci = await botMove(bot, chess, engine, info).catch(() => null);
     if (g !== st.gen || st.destroyed) return;
     const minDelay = uci ? thinkTime(chess, uci, info) : 0; // a person does not answer every move at the same speed
     const elapsed = Date.now() - t0;
@@ -504,7 +647,8 @@ export function renderGame(view) {
     let move;
     try { move = chess.move(uciToMove(uci)); } catch (e) { console.error('Bad bot move', uci, e); renderAll(lastMoveSquares()); return; }
     sound.forMove(move, chess);
-    renderAll([move.from, move.to]);
+    renderAll(lastMoveSquares(), !browsing());
+    if (browsing()) renderBrowseCoach();
     save();
     if (checkEnd()) return;
     startPlayerTurn();
@@ -516,6 +660,7 @@ export function renderGame(view) {
     stopEngines();
     st.gen++;
     st.thinking = false;
+    st.viewPly = null;
     do { chess.undo(); } while (chess.history().length > 0 && chess.turn() !== data.playerColor);
     const ply = chess.history().length;
     for (const k of Object.keys(data.marks)) if (+k > ply) delete data.marks[k];
@@ -523,7 +668,8 @@ export function renderGame(view) {
     for (const k of Object.keys(data.picked)) if (+k > ply) delete data.picked[k];
     data.result = null; data.recorded = data.recorded; // a finished game stays recorded
     data.takebacks++;
-    board.setArrows([]);
+    setLiveArrows([]);
+    setLiveMarks({});
     setCoach('Move taken back. Try again!');
     renderAll(lastMoveSquares());
     save();
@@ -532,13 +678,13 @@ export function renderGame(view) {
 
   // A hint comes in three steps: the idea, the piece, then the move with its reasons.
   async function hint() {
-    if (chess.turn() !== data.playerColor || data.result || st.asking || st.thinking) return;
+    if (chess.turn() !== data.playerColor || data.result || st.asking || st.thinking || browsing()) return;
     const g = st.gen, fen = chess.fen();
     if (!st.hint) {
       setCoach('Thinking about a hint…');
       st.asking = true;
       const res = await helpAnalysis().finally(() => { st.asking = false; });
-      if (g !== st.gen || chess.fen() !== fen) return;
+      if (st.destroyed || g !== st.gen || chess.fen() !== fen) return;
       if (res.cancelled || !res.bestmove) { setCoach('No hint is ready yet. Tap Hint to try again.'); return; }
       st.hint = { uci: res.bestmove, analysis: res, step: 0 };
     }
@@ -549,11 +695,11 @@ export function renderGame(view) {
       if (h.step === 0) {
         setCoach(`💡 ${hintIdea(fen, h.uci, h.analysis, prev)} <span class="muted">(Tap Hint again for more.)</span>`);
       } else if (h.step === 1) {
-        board.setMarks({ [m.from]: 'hint' });
+        setLiveMarks({ [m.from]: 'hint' });
         setCoach(`💡 The move to find is with your <b>${PIECE_NAMES[chess.get(m.from).type]}</b> on ${m.from}. <span class="muted">(Tap Hint again to see it.)</span>`);
       } else {
-        board.setMarks({ [m.from]: 'hint' });
-        board.setArrows([{ from: m.from, to: m.to, color: 'blue' }]);
+        setLiveMarks({ [m.from]: 'hint' });
+        setLiveArrows([{ from: m.from, to: m.to, color: 'blue' }]);
         const ex = explainEngineMove(fen, h.uci, h.analysis, prev);
         const alt = runnerUp(fen, h.analysis);
         setCoach(`💡 The engine suggests <b>${esc(ex.san)}</b>.${reasonList(ex.reasons)}${footnote(ex.line, ex.eval)}
@@ -561,7 +707,7 @@ export function renderGame(view) {
       }
     } catch (e) {
       console.error('hint failed', e);
-      board.setArrows([{ from: m.from, to: m.to, color: 'blue' }]);
+      setLiveArrows([{ from: m.from, to: m.to, color: 'blue' }]);
       setCoach(`💡 The engine suggests the arrow move.${ASK_LINKS}`);
       h.step = 2;
     }
@@ -580,7 +726,8 @@ export function renderGame(view) {
   /** The engine's view of the current game position, reusing this turn's analysis when it finished. */
   async function positionAnalysis() {
     const r = st.turnAnalysis ? await st.turnAnalysis : null;
-    return r && !r.cancelled && r.bestmove ? r : analyser.analyse(chess.fen(), { depth: COACH_DEPTH });
+    return r && !r.cancelled && r.bestmove ? r
+      : analyser.analyse(chess.fen(), { depth: COACH_DEPTH }).catch(() => ({ bestmove: null, lines: [], score: null, cancelled: true }));
   }
 
   /**
@@ -593,9 +740,9 @@ export function renderGame(view) {
       const entry = { fen }, ply = chess.history().length;
       entry.promise = analyser.analyse(fen, HELP).then(r => {
         if (r.cancelled || !r.bestmove) { if (st.help === entry) st.help = null; }
-        else if (st.help === entry && chess.fen() === fen) { st.turnAnalysis = Promise.resolve(r); data.evals[ply] = r.score; renderEval(); }
+        else if (!st.destroyed && st.help === entry && chess.fen() === fen) { st.turnAnalysis = Promise.resolve(r); data.evals[ply] = r.score; renderEval(); }
         return r;
-      });
+      }).catch(() => { if (st.help === entry) st.help = null; return { bestmove: null, lines: [], score: null, cancelled: true }; });
       st.help = entry;
     }
     return st.help.promise;
@@ -604,7 +751,7 @@ export function renderGame(view) {
   // ---------- "What if?" board ----------
   // Moves are played on a copy, for either side. The game, its stats and its saved state stay as they were.
   async function openSandbox() {
-    if (st.sandbox || st.asking || data.result || st.thinking || chess.turn() !== data.playerColor) return;
+    if (st.sandbox || st.asking || data.result || st.thinking || browsing() || chess.turn() !== data.playerColor) return;
     const counted = countHelp(); // seeing the engine's view is help, like a hint
     const intro = `🔍 <b>What if?</b> Your game is paused. Play a move for either side to see what happens next.${counted ? ' <span class="muted">This counts as a hint.</span>' : ''}${COMPARE_LINK}`;
     const sb = st.sandbox = {
@@ -615,7 +762,7 @@ export function renderGame(view) {
     setCoach(intro);
     renderAll(lastMoveSquares(), false);
     const r = await positionAnalysis();
-    if (st.sandbox !== sb) return;
+    if (st.destroyed || st.sandbox !== sb) return;
     sb.steps[0].analysis = r;
     sb.busy = false;
     renderAll(lastMoveSquares(), false);
@@ -624,8 +771,8 @@ export function renderGame(view) {
   function closeSandbox() {
     const { restore } = st.sandbox;
     st.sandbox = null;
-    board.setMarks(restore.marks);
-    board.setArrows(restore.arrows);
+    setLiveMarks(restore.marks);
+    setLiveArrows(restore.arrows);
     setCoach(restore.coach);
     renderAll(lastMoveSquares(), false);
   }
@@ -637,7 +784,7 @@ export function renderGame(view) {
     let promotion;
     if (piece && piece.type === 'p' && (to[1] === '8' || to[1] === '1')) {
       promotion = getSettings().autoQueen ? 'q' : await board.promote(piece.color);
-      if (st.sandbox !== sb) return;
+      if (st.destroyed || st.sandbox !== sb) return;
       if (!promotion) { renderBoard(lastMoveSquares(), false); return; }
     }
     const fenBefore = sb.chess.fen();
@@ -650,8 +797,9 @@ export function renderGame(view) {
     setCoach('Looking at what happens…');
     renderAll([move.from, move.to]);
     const over = sb.chess.isGameOver();
-    const after = over ? null : await analyser.analyse(sb.chess.fen(), WHATIF);
-    if (st.sandbox !== sb) return;
+    const after = over ? null : await analyser.analyse(sb.chess.fen(), WHATIF)
+      .catch(() => ({ bestmove: null, lines: [], score: null, cancelled: true }));
+    if (st.destroyed || st.sandbox !== sb) return;
     let shown = { html: 'The engine could not look at this position.', arrows: [] };
     try { shown = whatIfMove(fenBefore, move.lan, sb.steps.at(-1).analysis, after, data.playerColor); } catch (e) { console.error('what if failed', e); }
     sb.steps.push({ analysis: after, html: shown.html + (over ? '' : COMPARE_LINK), arrows: shown.arrows });
@@ -676,14 +824,16 @@ export function renderGame(view) {
 
   /** Show the top engine moves side by side, on the game or on the What if? board. */
   async function compareTop() {
-    const sb = st.sandbox, c = pos(), fen = c.fen();
-    if (st.asking || sb?.busy || c.isGameOver()) return;
+    const sb = st.sandbox, c = pos(), fen = c.fen(), g = st.gen;
+    if (st.asking || sb?.busy || (!sb && browsing()) || c.isGameOver()) return;
     st.asking = true;
     if (sb) { sb.busy = true; renderBoard(lastMoveSquares(), false); renderControls(); }
     setCoach('Comparing the top moves…');
     // The game position shares its analysis with the hint, so both name the same best move.
-    const r = await (fen === chess.fen() ? helpAnalysis() : analyser.analyse(fen, HELP)).finally(() => { st.asking = false; });
-    if (st.sandbox !== sb || pos().fen() !== fen) return;
+    const r = await (fen === chess.fen() ? helpAnalysis() : analyser.analyse(fen, HELP))
+      .catch(() => ({ bestmove: null, lines: [], score: null, cancelled: true }))
+      .finally(() => { st.asking = false; });
+    if (st.destroyed || g !== st.gen || st.sandbox !== sb || (!sb && chess.fen() !== fen) || (sb && sb.chess.fen() !== fen)) return;
     if (r.cancelled || !r.lines.length) { if (sb) showSandboxStep(); else setCoach('The comparison is not ready. Tap Hint to try again.'); return; }
     const shown = compareMoves(fen, r, data.playerColor, c.history({ verbose: true }).at(-1) || null);
     if (sb) {
@@ -691,11 +841,11 @@ export function renderGame(view) {
       showSandboxStep();
     } else {
       setCoach(`${shown.html}<div class="coach-acts"><button data-act="whatif">What if…?</button></div>`);
-      board.setArrows(shown.arrows);
+      setLiveArrows(shown.arrows);
     }
   }
 
-  // ---------- buttons ----------
+  // ---------- buttons & history inputs ----------
   $('#hintBtn', view).addEventListener('click', hint);
   $('#undoBtn', view).addEventListener('click', undo);
   $('#whatIfBtn', view).addEventListener('click', () => (st.sandbox ? closeSandbox() : openSandbox()));
@@ -703,6 +853,7 @@ export function renderGame(view) {
   $('#resignBtn', view).addEventListener('click', async () => {
     if (data.result) { location.hash = '#/play'; return; }
     const ok = await confirmBox('Resign?', `<p class="muted">${isWhatIf() ? 'You chose moves for the bot, so this game does not count in your stats.' : 'The game will count as a loss.'}</p>`, 'Resign');
+    if (st.destroyed) return;
     if (ok && !data.result) {
       stopEngines(); st.gen++; st.thinking = false;
       finish({ winner: data.playerColor === 'w' ? 'b' : 'w', reason: 'resignation' });
@@ -710,8 +861,55 @@ export function renderGame(view) {
     }
   });
 
+  $('#histPrev', view).addEventListener('click', () => goHistory(shownPly() - 1));
+  $('#histNext', view).addEventListener('click', () => goHistory(shownPly() + 1));
+  $('#histLive', view).addEventListener('click', () => goHistory(chess.history().length));
+  $('#histRange', view).addEventListener('input', e => goHistory(+e.target.value, { animate: false, playSound: false }));
+  $('#moves', view).addEventListener('click', e => {
+    if (st.sandbox) return;
+    const m = e.target.closest('[data-ply]');
+    if (m) goHistory(+m.dataset.ply);
+  });
+
+  // Swipe left/right on the coach box to browse history.
+  let swipe = null;
+  const coachEl = $('#coach', view);
+  coachEl.addEventListener('pointerdown', e => {
+    if (st.sandbox || e.isPrimary === false || (e.button !== undefined && e.button !== 0)) return;
+    swipe = { id: e.pointerId, x: e.clientX, y: e.clientY };
+  });
+  coachEl.addEventListener('pointerup', e => {
+    if (!swipe || e.pointerId !== swipe.id) return;
+    const dx = e.clientX - swipe.x, dy = e.clientY - swipe.y;
+    swipe = null;
+    if (st.sandbox || Math.abs(dx) <= 40 || Math.abs(dx) <= Math.abs(dy)) return;
+    goHistory(shownPly() + (dx < 0 ? 1 : -1));
+  });
+  coachEl.addEventListener('pointercancel', e => {
+    if (swipe && e.pointerId === swipe.id) swipe = null;
+  });
+
+  // Arrow keys step through move history on a computer.
+  const onKey = e => {
+    if (st.destroyed || st.sandbox || e.altKey || e.ctrlKey || e.metaKey) return;
+    if (e.target?.closest?.('input, select, textarea') || $('#modalRoot')?.childElementCount) return;
+    const n = chess.history().length;
+    if (!n) return;
+    if (e.key === 'Escape') {
+      if (browsing()) { e.preventDefault(); goHistory(n); }
+      return;
+    }
+    const to = { ArrowLeft: shownPly() - 1, ArrowRight: shownPly() + 1, Home: 0, End: n }[e.key];
+    if (to != null) { e.preventDefault(); goHistory(to); }
+  };
+  window.addEventListener('keydown', onKey);
+
   // ---------- start ----------
-  function destroy() { st.destroyed = true; st.gen++; st.sandbox = null; stopEngines(); }
+  function destroy() {
+    st.destroyed = true; st.gen++; st.sandbox = null;
+    window.removeEventListener('keydown', onKey);
+    stopEngines();
+  }
 
   renderAll(lastMoveSquares(), false);
   loadOpenings().then(() => { if (!st.destroyed) renderOpening(); });
@@ -719,7 +917,7 @@ export function renderGame(view) {
 
   if (data.result) {
     const r = data.result;
-    setCoach(`Game over: ${!r.winner ? 'draw' : r.winner === data.playerColor ? 'you won' : bot.name + ' won'} by ${r.reason}.`);
+    setCoach(`Game over: ${!r.winner ? 'draw' : r.winner === data.playerColor ? 'you won' : esc(bot.name) + ' won'} by ${esc(r.reason)}.`);
     board.setMovable(null);
   } else if (chess.history().length === 0) {
     setCoach(data.playerColor === 'w'

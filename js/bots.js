@@ -183,6 +183,7 @@ export async function botMove(bot, chess, eng = engine, info = {}) {
   // Otherwise: the better the engine rates a move and the more natural it looks, the likelier it is.
   const sign = me === 'w' ? 1 : -1;
   const scored = r.lines.filter(l => l.move).map(l => ({ move: l.move, v: sign * scoreToCp(l.score) }));
+  if (!scored.length) return r.bestmove;
   const best = Math.max(...scored.map(s => s.v));
   return sample(scored, s => Math.exp(Math.max(s.v - best, -3000) / c.temp + (looks.get(s.move) || 0))).move;
 }

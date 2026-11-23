@@ -55,8 +55,12 @@ export function renderReview(view, param) {
   const chess = new Chess();
   const verbose = [];
   for (const u of data.moves) { try { verbose.push(chess.move(uciToMove(u))); } catch { break; } }
-  const fens = [verbose.length ? verbose[0].before : chess.fen(), ...verbose.map(m => m.after)];
   const N = verbose.length;
+  if (!N) {
+    view.innerHTML = `<div class="card center"><p>No game to review yet.</p><a class="btn primary" href="#/play">Play a game</a></div>`;
+    return;
+  }
+  const fens = [verbose[0].before, ...verbose.map(m => m.after)];
   let destroyed = false;
   let cur = 0;
   let mode = 'report'; // 'report' | 'moves' | 'retry'
@@ -319,7 +323,8 @@ export function renderReview(view, param) {
       ${mode === 'moves' ? `<line class="gcur" x1="${cur}" x2="${cur}" y1="0" y2="100" stroke="var(--accent)" stroke-width="2" vector-effect="non-scaling-stroke"/>` : ''}${dots}`;
     g.onclick = e => {
       const b = g.getBoundingClientRect();
-      startMoves(Math.round((e.clientX - b.left) / b.width * N));
+      if (!b.width) return;
+      go(Math.round((e.clientX - b.left) / b.width * N));
     };
   }
 
@@ -646,6 +651,7 @@ export function renderReview(view, param) {
 
   function startMoves(ply = cur || 1) {
     if (!moves) return;
+    if (line) { stopAuto(); line = null; $('#nextMistake', view).textContent = 'Next mistake'; }
     cur = Math.max(0, Math.min(N, ply));
     setMode('moves');
     drawGraph($('#graphMini', view));
@@ -732,7 +738,7 @@ export function renderReview(view, param) {
     let promotion;
     if (piece && piece.type === 'p' && (to[1] === '8' || to[1] === '1')) {
       promotion = getSettings().autoQueen ? 'q' : await board.promote(piece.color);
-      if (!retry) return;
+      if (destroyed || !retry) return;
       if (!promotion) { showRetry(); return; }
     }
     let mv;
@@ -851,14 +857,21 @@ export function renderReview(view, param) {
   });
 
   // Swipe left/right on the comment area to navigate
-  let sx = null;
+  let swipe = null;
   const coach = $('#coach', view);
-  coach.addEventListener('pointerdown', e => { sx = e.clientX; });
+  coach.addEventListener('pointerdown', e => {
+    if (mode !== 'moves' || e.isPrimary === false || (e.button !== undefined && e.button !== 0)) return;
+    swipe = { id: e.pointerId, x: e.clientX, y: e.clientY };
+  });
   coach.addEventListener('pointerup', e => {
-    if (sx == null || mode !== 'moves') return;
-    const dx = e.clientX - sx; sx = null;
-    if (Math.abs(dx) <= 40) return;
+    if (!swipe || e.pointerId !== swipe.id) return;
+    const dx = e.clientX - swipe.x, dy = e.clientY - swipe.y;
+    swipe = null;
+    if (mode !== 'moves' || Math.abs(dx) <= 40 || Math.abs(dx) <= Math.abs(dy)) return;
     if (line) stepLine(line.i + (dx < 0 ? 1 : -1)); else go(cur + (dx < 0 ? 1 : -1));
+  });
+  coach.addEventListener('pointercancel', e => {
+    if (swipe && e.pointerId === swipe.id) swipe = null;
   });
 
   renderReport();
@@ -873,7 +886,7 @@ export function renderReview(view, param) {
 
   // Arrow keys step through the game on a computer.
   const onKey = e => {
-    if (mode !== 'moves' || e.target.closest('input, select, textarea')) return;
+    if (mode !== 'moves' || e.target?.closest?.('input, select, textarea')) return;
     if (line) {
       const to = { ArrowLeft: line.i - 1, ArrowRight: line.i + 1, Home: 0, End: line.moves.length }[e.key];
       if (to != null) { e.preventDefault(); stepLine(to); } else if (e.key === 'Escape') closeLine();
