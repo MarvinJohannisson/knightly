@@ -159,8 +159,9 @@ function renderSettings(v) {
 /** Saves all progress to a file. Returns false if the player cancelled. */
 async function saveBackup() {
   const now = new Date();
-  store.set('lastBackup', now.getTime());
-  const text = JSON.stringify({ app: 'knightly', version: 1, saved: now.toISOString(), data: store.exportAll() });
+  const ts = now.getTime();
+  const data = { ...store.exportAll(), lastBackup: JSON.stringify(ts) };
+  const text = JSON.stringify({ app: 'knightly', version: 1, saved: now.toISOString(), data });
   const file = new File([text], `knightly-backup-${now.toISOString().slice(0, 10)}.json`, { type: 'application/json' });
   // Downloads are unreliable in installed phone apps, so use the share sheet there.
   if (matchMedia('(pointer: coarse)').matches && navigator.canShare?.({ files: [file] })) {
@@ -173,6 +174,7 @@ async function saveBackup() {
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 10000);
   }
+  store.set('lastBackup', ts);
   toast('Backup saved');
   return true;
 }
@@ -181,11 +183,13 @@ async function restoreBackup(file) {
   let backup = null;
   try {
     backup = JSON.parse(await file.text());
-    Object.values(backup.data).forEach(v => JSON.parse(v));
+    if (!backup || typeof backup.data !== 'object' || !backup.data || Array.isArray(backup.data)) throw 0;
+    Object.values(backup.data).forEach(v => { if (typeof v !== 'string') throw 0; JSON.parse(v); });
   } catch { backup = null; }
   if (backup?.app !== 'knightly') { toast('That is not a Knightly backup file'); return; }
-  const when = new Date(backup.saved).toLocaleDateString();
-  if (!await confirmBox('Restore this backup?', `<p class="muted">Saved on ${esc(when)}. Everything currently on this device will be replaced.</p>`, 'Restore')) return;
+  const d = backup.saved ? new Date(backup.saved) : null;
+  const when = d && !Number.isNaN(d.getTime()) ? `Saved on ${esc(d.toLocaleDateString())}. ` : '';
+  if (!await confirmBox('Restore this backup?', `<p class="muted">${when}Everything currently on this device will be replaced.</p>`, 'Restore')) return;
   try { store.importAll(backup.data); } catch { toast('Could not restore the backup'); return; }
   applySettings();
   route();

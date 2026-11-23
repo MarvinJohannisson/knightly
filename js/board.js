@@ -180,6 +180,7 @@ export class Board {
       const [x1, y1] = this._xy(a.from), [x2, y2] = this._xy(a.to);
       const cx1 = x1 + .5, cy1 = y1 + .5, cx2 = x2 + .5, cy2 = y2 + .5;
       const len = Math.hypot(cx2 - cx1, cy2 - cy1);
+      if (!len) continue;
       const shorten = 0.42;
       const ex = cx2 - (cx2 - cx1) / len * shorten, ey = cy2 - (cy2 - cy1) / len * shorten;
       const col = a.color || 'green';
@@ -252,7 +253,7 @@ export class Board {
     const rectOf = () => this.root.getBoundingClientRect();
 
     this.root.addEventListener('pointerdown', e => {
-      if (e.button !== undefined && e.button !== 0) return;
+      if (e.isPrimary === false || (e.button !== undefined && e.button !== 0)) return;
       const sq = this._eventSq(e);
       if (!sq) return;
       this.opts.onTap && this.opts.onTap(sq);
@@ -306,7 +307,8 @@ export class Board {
     };
     this.root.addEventListener('pointerup', end);
     this.root.addEventListener('pointercancel', e => {
-      if (!drag) return;
+      if (!drag || e.pointerId !== drag.pointerId) return;
+      if (drag.over && this.sqEls[drag.over]) this.sqEls[drag.over].classList.remove('hover');
       if (drag.el) { drag.el.classList.remove('dragging'); this._place(drag.el, drag.from, false); }
       drag = null;
     });

@@ -115,7 +115,8 @@ export function renderLesson(view, id) {
     let promotion;
     if (piece && piece.type === 'p' && (to[1] === '8' || to[1] === '1')) {
       promotion = getSettings().autoQueen ? 'q' : await board.promote(piece.color);
-      if (!promotion) { board.setPosition(chess.fen(), { animate: false }); board.setMovable(chess.turn(), destsFrom(chess)); return; }
+      if (destroyed || g !== st.gen) return;
+      if (!promotion) { board.setPosition(chess.fen(), { animate: false, check: checkSquare(chess) }); board.setMovable(chess.turn(), destsFrom(chess)); return; }
     }
     const uci = from + to + (promotion || '');
     let move;
@@ -249,7 +250,11 @@ export function renderCourse(view, id) {
       if (i % 2 === 0) html += `<span class="num">${i / 2 + 1}.</span>`;
       html += `<span class="mv ${i + 1 === highlight ? 'cur' : ''}" data-ply="${i + 1}">${esc(line[i].san)}</span>`;
     }
-    const el = $('#moves', view); el.innerHTML = html; el.scrollLeft = el.scrollWidth;
+    const el = $('#moves', view);
+    el.innerHTML = html;
+    const c = el.querySelector('.cur');
+    if (c) el.scrollLeft = Math.max(0, c.offsetLeft - el.clientWidth / 2 + c.offsetWidth / 2);
+    else el.scrollLeft = 0;
   }
 
   function showLearn(n) {

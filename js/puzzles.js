@@ -8,7 +8,10 @@ let puzzleDb = null;
 let loading = null;
 function loadPuzzles() {
   if (puzzleDb) return Promise.resolve(puzzleDb);
-  if (!loading) loading = fetch('data/puzzles.json').then(r => r.json()).then(j => (puzzleDb = j));
+  if (!loading) {
+    loading = fetch('data/puzzles.json').then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(j => (puzzleDb = j)).catch(e => { loading = null; throw e; });
+  }
   return loading;
 }
 
@@ -61,7 +64,8 @@ export function renderPuzzle(view, theme) {
   const rated = !theme;
 
   function renderHeader(delta) {
-    $('#pRating', view).innerHTML = `${Math.round(ps.rating)}${delta ? `<span class="delta ${delta > 0 ? 'up' : 'down'}">${delta > 0 ? '+' : ''}${delta}</span>` : ''}<small>${rated ? 'Puzzle rating' : 'Practice · unrated'}${ps.streak > 1 ? ` · 🔥 ${ps.streak}` : ''}</small>`;
+    const sub = st?.isRetry ? 'Retry · unrated' : rated ? 'Puzzle rating' : 'Practice · unrated';
+    $('#pRating', view).innerHTML = `${Math.round(ps.rating)}${delta ? `<span class="delta ${delta > 0 ? 'up' : 'down'}">${delta > 0 ? '+' : ''}${delta}</span>` : ''}<small>${sub}${ps.streak > 1 ? ` · 🔥 ${ps.streak}` : ''}</small>`;
   }
 
   function setStatus(kind, html) {
@@ -96,13 +100,17 @@ export function renderPuzzle(view, theme) {
   async function next() {
     const db = await loadPuzzles().catch(() => null);
     if (destroyed) return;
-    if (!db) { $('#statusText', view).textContent = 'Could not load puzzles.'; return; }
+    if (!db) {
+      $('#statusText', view).textContent = 'Could not load puzzles.';
+      setActions([{ label: 'Try again', cls: 'primary', fn: next }]);
+      return;
+    }
     const p = choose(db);
     if (!p) { $('#statusText', view).textContent = 'No puzzles for this theme.'; return; }
-    start(p);
+    start(p, false);
   }
 
-  async function start(p) {
+  async function start(p, isRetry = false) {
     // Format: fen = position before the opponent's move; m = "opp sol1 reply sol2 ..." (UCI)
     let chess, last = null;
     try {
@@ -111,9 +119,9 @@ export function renderPuzzle(view, theme) {
       last = chess.move(uciToMove(ms[0]));
       if (!p.sol) p.sol = ms.slice(1);
     } catch (e) { console.warn('bad puzzle', p.id, e); next(); return; }
-    st = {
-      p, chess, step: 0, failed: false, hinted: false, done: false, color: chess.turn(),
-      startFen: last.before, lastSetup: last,
+    const g = st = {
+      p, chess, step: 0, failed: false, hinted: false, hintShown: false, done: false, isRetry,
+      color: chess.turn(), startFen: last.before, lastSetup: last,
     };
     board.setArrows([]); board.setMarks({});
     board.setOrientation(st.color);
@@ -128,7 +136,7 @@ export function renderPuzzle(view, theme) {
       { label: 'Show solution', cls: 'ghost', fn: showSolution },
     ]);
     await sleep(450);
-    if (destroyed || st.p !== p) return;
+    if (destroyed || st !== g) return;
     board.setPosition(chess.fen(), { lastMove: [last.from, last.to], check: checkSquare(chess) });
     sound.forMove(last, chess);
     board.setMovable(st.color, destsFrom(chess));
@@ -136,11 +144,13 @@ export function renderPuzzle(view, theme) {
 
   async function onMove(from, to) {
     if (!st || st.done) return;
+    const g = st;
     const { chess, p } = st;
     const piece = chess.get(from);
     let promotion;
     if (piece && piece.type === 'p' && (to[1] === '8' || to[1] === '1')) {
       promotion = getSettings().autoQueen ? 'q' : await board.promote(piece.color);
+      if (destroyed || st !== g || st.done) return;
       if (!promotion) { board.setPosition(chess.fen(), { animate: false, check: checkSquare(chess) }); board.setMovable(st.color, destsFrom(chess)); return; }
     }
     const expected = p.sol[st.step];
@@ -155,27 +165,27 @@ export function renderPuzzle(view, theme) {
       board.setPosition(move.after, { lastMove: [from, to], animate: true });
       board.setMarks({ [to]: 'wrong' });
       board.setMovable(null);
-      if (!st.failed) { st.failed = true; recordResult(false); }
+      if (!st.failed) { st.failed = true; if (!st.isRetry) recordResult(false); }
       setStatus('fail', `<b>That's not it.</b><div class="small">Try again, or view the solution.</div>`);
       await sleep(700);
-      if (destroyed || !st || st.p !== p) return;
+      if (destroyed || st !== g) return;
       board.setMarks({});
       board.setPosition(chess.fen(), { lastMove: lastSquares(), check: checkSquare(chess) });
       board.setMovable(st.color, destsFrom(chess));
       return;
     }
     sound.forMove(move, chess);
-    board.setMarks({ [to]: 'good' });
     board.setArrows([]);
     board.setPosition(chess.fen(), { lastMove: [from, to], check: checkSquare(chess) });
     board.setMarks({ [to]: 'good' });
+    st.hintShown = false;
     st.step++;
     if (st.step >= p.sol.length || chess.isCheckmate()) return solved();
     // opponent reply
     board.setMovable(null);
     setStatus('ok', `<b>Best move!</b><div class="small">Keep going…</div>`);
     await sleep(500);
-    if (destroyed || st.p !== p) return;
+    if (destroyed || st !== g) return;
     const reply = chess.move(uciToMove(p.sol[st.step]));
     st.step++;
     sound.forMove(reply, chess);
@@ -194,11 +204,12 @@ export function renderPuzzle(view, theme) {
   function hint() {
     if (!st || st.done) return;
     const m = uciToMove(st.p.sol[st.step]);
-    if (!st.hinted) { st.hinted = true; if (!st.failed) { st.failed = true; recordResult(false, true); } }
+    if (!st.hinted) { st.hinted = true; if (!st.failed) { st.failed = true; if (!st.isRetry) recordResult(false, true); } }
     if (!st.hintShown) {
       board.setMarks({ [m.from]: 'hint' });
       st.hintShown = true;
-      setStatus('turn', `<b>Hint:</b> move the highlighted piece.<div class="small muted">${rated ? 'A hint costs half as many rating points as a miss, and ends your streak.' : 'A hint ends your streak.'}</div>`);
+      const note = st.isRetry ? 'Retry is unrated.' : rated ? 'A hint costs half as many rating points as a miss, and ends your streak.' : 'A hint ends your streak.';
+      setStatus('turn', `<b>Hint:</b> move the highlighted piece.<div class="small muted">${note}</div>`);
     } else {
       board.setArrows([{ from: m.from, to: m.to, color: 'blue' }]);
     }
@@ -206,7 +217,7 @@ export function renderPuzzle(view, theme) {
 
   async function showSolution() {
     if (!st || st.done) return;
-    if (!st.failed) { st.failed = true; recordResult(false); }
+    if (!st.failed) { st.failed = true; if (!st.isRetry) recordResult(false); }
     st.done = true;
     board.setMovable(null);
     const { chess, p } = st;
@@ -227,7 +238,7 @@ export function renderPuzzle(view, theme) {
     st.done = true;
     board.setMovable(null);
     sound.play('success');
-    if (!st.failed) recordResult(true);
+    if (!st.failed && !st.isRetry) recordResult(true);
     finishScreen(!st.failed);
   }
 
@@ -239,7 +250,7 @@ export function renderPuzzle(view, theme) {
       ${lesson ? `<div class="small muted" style="margin-top:4px">${lesson.icon} ${lesson.explain}</div>` : ''}`);
     setActions([
       { label: 'Next puzzle', cls: 'primary', fn: next, wide: true },
-      { label: 'Retry', cls: 'ghost', fn: () => start(st.p) },
+      { label: 'Retry', cls: 'ghost', fn: () => start(st.p, true) },
       { label: 'Analyse', cls: 'ghost', fn: analyse },
     ]);
   }
@@ -252,6 +263,7 @@ export function renderPuzzle(view, theme) {
     line.push(c.move(st.lastSetup.san));
     for (const u of p.sol) { try { line.push(c.move(uciToMove(u))); } catch { break; } }
     let i = line.length;
+    board.setArrows([]); board.setMarks({});
     const show = () => {
       const pos = new Chess(st.startFen);
       for (let k = 0; k < i; k++) pos.move(line[k].san);

@@ -4,7 +4,12 @@ let loading = null;
 
 export function loadOpenings() {
   if (db) return Promise.resolve(db);
-  if (!loading) loading = fetch(new URL('../data/openings.json', import.meta.url)).then(r => r.json()).then(j => (db = j)).catch(() => (db = {}));
+  if (!loading) {
+    loading = fetch(new URL('../data/openings.json', import.meta.url))
+      .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(j => (db = j))
+      .catch(() => { loading = null; return {}; });
+  }
   return loading;
 }
 

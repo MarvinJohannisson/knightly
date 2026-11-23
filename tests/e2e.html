@@ -91,6 +91,37 @@ async function run() {
   await sleep(300);
   log(!D().querySelector('#whatIfBtn.on') && !!D().querySelector('.sq.hint'), 'back to game restores the hint');
   log(/1\.\s*e4/.test(D().querySelector('#moves').textContent), 'back to game restores the move list');
+
+  // history scrubber, buttons, clickable move list, coach swipe & arrow keys
+  const totalPlies = read('game').moves.length;
+  const histPos = () => D().querySelector('#histPos').textContent;
+  log(histPos() === `${totalPlies}/${totalPlies}` && D().querySelector('#histLive').disabled, 'history bar starts live at ' + histPos());
+  D().querySelector('#histPrev').click();
+  await sleep(150);
+  log(histPos() === `${totalPlies - 1}/${totalPlies}` && !D().querySelector('#histLive').disabled && D().querySelector('#hintBtn').disabled && !D().querySelector('.sq.hint'), 'history back enters browse mode and hides hint');
+  const range = D().querySelector('#histRange');
+  range.value = '0';
+  range.dispatchEvent(new (W().Event)('input', { bubbles: true }));
+  await sleep(150);
+  log(histPos() === `0/${totalPlies}` && /Starting position/.test(coachText()), 'history scrubber jumps to starting position');
+  D().querySelector('#moves [data-ply="2"]').click();
+  await sleep(150);
+  log(histPos() === `2/${totalPlies}` && D().querySelector('#moves .mv.cur')?.dataset.ply === '2', 'clicking move list jumps to ply 2');
+  const coachBox = D().querySelector('#coach');
+  coachBox.dispatchEvent(new (W().PointerEvent)('pointerdown', { bubbles: true, clientX: 220, clientY: 100, pointerId: 2, button: 0, isPrimary: true }));
+  coachBox.dispatchEvent(new (W().PointerEvent)('pointerup', { bubbles: true, clientX: 140, clientY: 105, pointerId: 2, button: 0, isPrimary: true }));
+  await sleep(150);
+  log(histPos() === `3/${totalPlies}`, 'swiping coach left steps forward to ply 3');
+  W().dispatchEvent(new (W().KeyboardEvent)('keydown', { key: 'ArrowLeft', bubbles: true }));
+  await sleep(150);
+  log(histPos() === `2/${totalPlies}`, 'ArrowLeft steps back to ply 2');
+  D().querySelector('#histNext').click();
+  await sleep(150);
+  log(histPos() === `3/${totalPlies}`, 'history forward steps to ply 3');
+  D().querySelector('#histLive').click();
+  await sleep(150);
+  log(histPos() === `${totalPlies}/${totalPlies}` && D().querySelector('#histLive').disabled && !!D().querySelector('.sq.hint'), 'Live returns to current position and restores hint');
+
   // takeback
   const before = read('game').moves.length;
   D().querySelector('#undoBtn').click();
@@ -298,7 +329,22 @@ async function run() {
       await sleep(1100);
     }
     const ok = await waitFor(() => D().querySelector('#status.ok') && /solved|Well done|Excellent|Great/i.test(D().querySelector('#statusText').textContent), 5000);
-    log(!!ok, 'puzzle solved by playing the solution; rating now ' + Math.round(read('puzzles')?.rating));
+    const afterSolve = read('puzzles');
+    log(!!ok, 'puzzle solved by playing the solution; rating now ' + Math.round(afterSolve?.rating));
+    // Retry must not add extra rating, solved count, or streak
+    const retryBtn = [...D().querySelectorAll('#actions button')].find(b => /Retry/.test(b.textContent));
+    retryBtn?.click();
+    await sleep(700);
+    for (let i = 1; i < ms.length; i += 2) {
+      const u = ms[i];
+      await move(u.slice(0, 2), u.slice(2, 4), orient);
+      if (u.length > 4) { await sleep(200); const b = D().querySelector('.promo button[data-p="' + u[4] + '"]'); if (b) b.dispatchEvent(new (W().PointerEvent)('pointerdown', { bubbles: true })); }
+      await sleep(1100);
+    }
+    const ok2 = await waitFor(() => D().querySelector('#status.ok'), 5000);
+    const afterRetry = read('puzzles');
+    log(!!ok2 && afterRetry.rating === afterSolve.rating && afterRetry.solved === afterSolve.solved && afterRetry.streak === afterSolve.streak,
+      'puzzle retry gives no extra rating or streak');
   }
 
   // ---------- opening course practice ----------

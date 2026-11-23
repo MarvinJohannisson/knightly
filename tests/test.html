@@ -194,6 +194,12 @@ async function run() {
   log(cmp.arrows.length === 3 && (cmp.html.match(/<li>/g) || []).length === 3, 'compare lists three moves: ' + strip(cmp.html).slice(0, 160));
   const forced = '7k/8/8/8/8/8/6q1/7K w - - 0 1';
   log(/only legal move/.test(strip(compareMoves(forced, await engine.analyse(forced, { depth: 8, multipv: 3 }), 'w').html)), 'compare says when there is one legal move');
+  const oneLine = compareMoves(open4, { lines: [{ move: 'f1b5', score: { cp: 30 }, pv: ['f1b5', 'a7a6'] }] }, 'w');
+  log(/top engine move/.test(strip(oneLine.html)) && oneLine.arrows.length === 1, 'compare handles a single engine line without crashing');
+  const stoppedP = engine.analyse(open4, { depth: 18 });
+  engine.stop();
+  const stoppedR = await stoppedP;
+  log(stoppedR.cancelled === true, 'engine.stop() cancels an analyse() called in the same tick');
   log(/queen on e5 where it can be taken/.test(mistakeReason('r1b1kbnr/pppp1ppp/2n5/4p2Q/4P3/8/PPPP1PPP/RNB1KBNR w KQkq - 2 3', 'h5e5', { replyUci: 'c6e5' })), 'a hanging piece is called out');
 
   // ---------- what the coach says about the best moves ----------
